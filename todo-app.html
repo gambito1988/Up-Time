@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>To-Do List App | Up Time</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="todo-styles.css">
+</head>
+<body>
+    <!-- Navegación -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="navbar-brand">
+                <h1><i class="fas fa-tasks"></i> To-Do List</h1>
+            </div>
+            <div class="navbar-menu" id="navbarMenu">
+                <a href="index.html" class="nav-link">← Volver</a>
+            </div>
+            <div class="hamburger" id="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <main class="todo-container">
+        <div class="container">
+            <div class="todo-wrapper">
+                <!-- Header -->
+                <div class="todo-header">
+                    <h2>Mis Tareas</h2>
+                    <p id="fechaActual"></p>
+                </div>
+
+                <!-- Formulario de entrada -->
+                <div class="input-section">
+                    <form id="todoForm">
+                        <div class="input-group">
+                            <input 
+                                type="text" 
+                                id="todoInput" 
+                                placeholder="Añade una nueva tarea..." 
+                                autocomplete="off"
+                            >
+                            <select id="prioridadSelect">
+                                <option value="baja">Baja</option>
+                                <option value="media" selected>Media</option>
+                                <option value="alta">Alta</option>
+                            </select>
+                            <button type="submit" class="btn btn-add">
+                                <i class="fas fa-plus"></i> Agregar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Filtros -->
+                <div class="filters">
+                    <button class="filter-btn active" data-filter="todas">
+                        Todas (<span id="countTotal">0</span>)
+                    </button>
+                    <button class="filter-btn" data-filter="pendientes">
+                        Pendientes (<span id="countPendientes">0</span>)
+                    </button>
+                    <button class="filter-btn" data-filter="completadas">
+                        Completadas (<span id="countCompletadas">0</span>)
+                    </button>
+                    <button class="filter-btn" data-filter="alta">
+                        Alta Prioridad (<span id="countAlta">0</span>)
+                    </button>
+                </div>
+
+                <!-- Lista de tareas -->
+                <div class="todo-list" id="todoList">
+                    <div class="empty-state">
+                        <i class="fas fa-inbox"></i>
+                        <p>No hay tareas. ¡Añade una para comenzar!</p>
+                    </div>
+                </div>
+
+                <!-- Acciones en lote -->
+                <div class="bulk-actions" id="bulkActions">
+                    <button id="clearCompletedBtn" class="btn btn-secondary">
+                        <i class="fas fa-trash"></i> Eliminar completadas
+                    </button>
+                    <button id="clearAllBtn" class="btn btn-danger">
+                        <i class="fas fa-broom"></i> Limpiar todo
+                    </button>
+                </div>
+
+                <!-- Estadísticas -->
+                <div class="stats">
+                    <div class="stat-item">
+                        <i class="fas fa-chart-pie"></i>
+                        <span>Productividad: <strong id="productividad">0%</strong></span>
+                    </div>
+                    <div class="stat-item">
+                        <i class="fas fa-clock"></i>
+                        <span>Última actualización: <strong id="lastUpdate">Ahora</strong></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal de confirmación -->
+    <div class="modal" id="confirmModal">
+        <div class="modal-content">
+            <h3 id="modalTitle">Confirmar acción</h3>
+            <p id="modalMessage">¿Estás seguro?</p>
+            <div class="modal-buttons">
+                <button class="btn btn-secondary" id="modalCancel">Cancelar</button>
+                <button class="btn btn-danger" id="modalConfirm">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast de notificaciones -->
+    <div id="toast" class="toast"></div>
+
+    <script src="todo-script.js"></script>
+</body>
+</html>
