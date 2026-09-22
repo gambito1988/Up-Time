@@ -1,16 +1,16 @@
-/* Variables de Colores - Esquema Negro, Dorado y Rojo */
+/* Variables de Colores - Esquema premium, más profesional */
 :root {
-    --color-primary: #D4AF37;       /* Dorado */
-    --color-secondary: #E63946;     /* Rojo */
-    --color-dark: #0a0e27;          /* Negro muy oscuro */
-    --color-darker: #1a1f3a;        /* Negro oscuro */
-    --color-light: #f5f5f5;         /* Gris muy claro */
+    --color-primary: #2e7df6;       /* Azul tecnológico */
+    --color-secondary: #f59e0b;     /* Dorado cálido */
+    --color-dark: #081722;          /* Azul muy oscuro */
+    --color-darker: #0f2233;        /* Azul gris oscuro */
+    --color-light: #edf4ff;         /* Gris azulado muy claro */
     --color-white: #ffffff;         /* Blanco */
-    --color-text: #e0e0e0;          /* Gris claro para texto */
-    --color-text-dark: #a0a0a0;     /* Gris oscuro para texto secundario */
-    --shadow: 0 2px 10px rgba(212, 175, 55, 0.1);
-    --shadow-lg: 0 5px 20px rgba(212, 175, 55, 0.15);
-    --glow: 0 0 20px rgba(212, 175, 55, 0.3);
+    --color-text: #e7edf7;          /* Texto claro */
+    --color-text-dark: #aebfd3;     /* Texto secundario */
+    --shadow: 0 10px 30px rgba(10, 18, 32, 0.18);
+    --shadow-lg: 0 20px 50px rgba(10, 18, 32, 0.22);
+    --glow: 0 0 20px rgba(46, 125, 246, 0.25);
 }
 
 /* Reset y estilos generales */
@@ -73,15 +73,15 @@ body::before {
 
 /* Navegación */
 .navbar {
-    background: linear-gradient(90deg, rgba(10, 14, 39, 0.95) 0%, rgba(26, 31, 58, 0.95) 100%);
+    background: rgba(8, 23, 34, 0.9);
     color: var(--color-white);
     padding: 1rem 0;
     position: sticky;
     top: 0;
     z-index: 1000;
-    backdrop-filter: blur(10px);
-    border-bottom: 2px solid var(--color-primary);
-    box-shadow: 0 4px 20px rgba(212, 175, 55, 0.15);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(46, 125, 246, 0.3);
+    box-shadow: var(--shadow);
 }
 
 .navbar .container {
@@ -92,12 +92,11 @@ body::before {
 
 .navbar-brand h1 {
     font-size: 1.8rem;
-    background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    font-weight: bold;
-    text-shadow: 0 0 30px rgba(212, 175, 55, 0.3);
+    color: var(--color-white);
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-shadow: 0 0 18px rgba(46, 125, 246, 0.35);
+    margin: 0;
 }
 
 .navbar-menu {
@@ -150,7 +149,10 @@ body::before {
 
 /* Hero Section */
 .hero {
-    background: linear-gradient(135deg, var(--color-dark) 0%, var(--color-darker) 50%, #0f1629 100%);
+    background:
+        radial-gradient(circle at top left, rgba(46, 125, 246, 0.18), transparent 30%),
+        radial-gradient(circle at bottom right, rgba(245, 158, 11, 0.12), transparent 30%),
+        linear-gradient(135deg, var(--color-dark) 0%, var(--color-darker) 100%);
     color: var(--color-white);
     padding: 150px 20px 100px;
     text-align: center;
@@ -198,15 +200,12 @@ body::before {
 }
 
 .hero-content h2 {
-    font-size: 3.5rem;
+    font-size: clamp(2.3rem, 4vw, 4rem);
     margin-bottom: 1rem;
-    background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    text-shadow: 0 0 40px rgba(212, 175, 55, 0.5);
-    font-weight: 900;
-    letter-spacing: -1px;
+    color: var(--color-white);
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    text-shadow: 0 8px 30px rgba(8, 23, 34, 0.4);
 }
 
 .hero-content p {
@@ -216,11 +215,12 @@ body::before {
 }
 
 .hero-subtitle {
-    color: var(--color-primary);
-    font-size: 1.2rem;
+    color: var(--color-secondary);
+    font-size: 1.15rem;
     margin-bottom: 2.5rem;
     font-weight: 700;
-    letter-spacing: 1px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
 }
 
 .hero-buttons {
@@ -265,27 +265,28 @@ body::before {
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, var(--color-primary), #f4c043);
-    color: var(--color-dark);
-    box-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
-    border: 2px solid var(--color-primary);
+    background: linear-gradient(135deg, var(--color-primary), #4ea3ff);
+    color: var(--color-white);
+    box-shadow: 0 12px 26px rgba(46, 125, 246, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .btn-primary:hover {
     transform: translateY(-3px);
-    box-shadow: 0 10px 30px rgba(212, 175, 55, 0.5);
+    box-shadow: 0 12px 32px rgba(46, 125, 246, 0.35);
 }
 
 .btn-secondary {
-    background: linear-gradient(135deg, var(--color-secondary), #ff6b7a);
+    background: rgba(255, 255, 255, 0.04);
     color: var(--color-white);
-    box-shadow: 0 0 20px rgba(230, 57, 70, 0.3);
-    border: 2px solid var(--color-secondary);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
 }
 
 .btn-secondary:hover {
     transform: translateY(-3px);
-    box-shadow: 0 10px 30px rgba(230, 57, 70, 0.5);
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 22px rgba(255,255,255,0.08);
 }
 
 /* Secciones */
@@ -297,16 +298,26 @@ section {
 
 .section-title {
     text-align: center;
-    font-size: 2.8rem;
+    font-size: clamp(2rem, 3vw, 2.8rem);
     margin-bottom: 3rem;
-    background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--color-white);
     position: relative;
-    padding-bottom: 1.5rem;
+    padding-bottom: 1.2rem;
     font-weight: 800;
-    letter-spacing: -0.5px;
+    letter-spacing: -0.04em;
+}
+
+.section-title::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 110px;
+    height: 3px;
+    background: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
+    border-radius: 99px;
+    box-shadow: 0 0 16px rgba(46, 125, 246, 0.35);
 }
 
 .section-title::after {
@@ -334,13 +345,13 @@ section {
 }
 
 .servicio-card {
-    background: linear-gradient(135deg, rgba(26, 31, 58, 0.8), rgba(15, 22, 41, 0.8));
+    background: rgba(17, 31, 43, 0.72);
     padding: 2.5rem;
-    border-radius: 15px;
+    border-radius: 18px;
     text-align: center;
-    box-shadow: 0 0 30px rgba(212, 175, 55, 0.1);
+    box-shadow: var(--shadow);
     transition: all 0.3s ease;
-    border: 2px solid rgba(212, 175, 55, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(10px);
     position: relative;
     overflow: hidden;
@@ -359,9 +370,9 @@ section {
 }
 
 .servicio-card:hover {
-    transform: translateY(-15px);
-    box-shadow: 0 15px 40px rgba(212, 175, 55, 0.3);
-    border-color: var(--color-primary);
+    transform: translateY(-10px);
+    box-shadow: var(--shadow-lg);
+    border-color: rgba(46, 125, 246, 0.5);
 }
 
 .servicio-card:hover::before {
@@ -444,13 +455,13 @@ section {
 }
 
 .stat {
-    background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(230, 57, 70, 0.2));
+    background: linear-gradient(135deg, rgba(46, 125, 246, 0.14), rgba(245, 158, 11, 0.08));
     color: var(--color-white);
     padding: 2.5rem;
-    border-radius: 15px;
+    border-radius: 18px;
     text-align: center;
-    border: 2px solid var(--color-primary);
-    box-shadow: 0 0 30px rgba(212, 175, 55, 0.2);
+    border: 1px solid rgba(46, 125, 246, 0.25);
+    box-shadow: var(--shadow);
     transition: all 0.3s ease;
 }
 
@@ -483,10 +494,10 @@ section {
 }
 
 .testimonio-card {
-    background: linear-gradient(135deg, rgba(26, 31, 58, 0.8), rgba(15, 22, 41, 0.8));
+    background: rgba(17, 31, 43, 0.72);
     padding: 2rem;
-    border-radius: 15px;
-    box-shadow: 0 0 30px rgba(212, 175, 55, 0.1);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
     border-left: 4px solid var(--color-primary);
     transition: all 0.3s ease;
     backdrop-filter: blur(10px);
@@ -727,15 +738,15 @@ section {
 .social-links a {
     width: 45px;
     height: 45px;
-    background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+    background: linear-gradient(135deg, var(--color-primary), #4ea3ff);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.3s ease;
-    color: var(--color-dark);
+    color: var(--color-white);
     font-weight: 700;
-    box-shadow: 0 0 20px rgba(212, 175, 55, 0.2);
+    box-shadow: 0 0 20px rgba(46, 125, 246, 0.25);
 }
 
 .social-links a:hover {
