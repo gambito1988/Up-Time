@@ -10,7 +10,7 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import quote
 
-from flask import Flask, abort, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -109,6 +109,11 @@ def prepare_database():
 @app.get("/")
 def home():
     return send_from_directory(BASE_DIR, "index.html")
+
+
+@app.get("/healthz")
+def healthz():
+    return jsonify(status="ok")
 
 
 @app.get("/<path:filename>")
