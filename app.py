@@ -10,13 +10,14 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import quote
 
-from flask import Flask, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Flask, abort, redirect, render_template, request, send_from_directory, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
 BASE_DIR = Path(__file__).resolve().parent
 DATABASE_PATH = BASE_DIR / "uptime.db"
 WHATSAPP_NUMBER = "5491161471426"
+PUBLIC_ASSETS = {"index.html", "styles.css", "script.js"}
 MEMBERSHIP_PLANS = {
     "basic": {"name": "Basic", "price": 5000, "description": "Soporte remoto y prioridad estándar."},
     "intermedio": {"name": "Intermedio", "price": 9000, "description": "Soporte remoto y una visita mensual."},
@@ -112,6 +113,8 @@ def home():
 
 @app.get("/<path:filename>")
 def assets(filename):
+    if filename not in PUBLIC_ASSETS:
+        abort(404)
     return send_from_directory(BASE_DIR, filename)
 
 
@@ -121,6 +124,8 @@ def contacto():
     email = request.form.get("email", "").strip()
     telefono = request.form.get("telefono", "").strip()
     mensaje = request.form.get("mensaje", "").strip()
+    if not nombre or not email or not mensaje:
+        return redirect(url_for("home") + "#contacto"), 400
 
     texto = (
         "Hola, me gustaría contactarme con Up Time.\n\n"
@@ -405,4 +410,4 @@ def admin_dashboard():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=os.environ.get("FLASK_DEBUG") == "1")

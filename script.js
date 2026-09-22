@@ -2,15 +2,19 @@
 const hamburger = document.getElementById('hamburger');
 const navbarMenu = document.getElementById('navbarMenu');
 
-hamburger.addEventListener('click', () => {
-    navbarMenu.classList.toggle('active');
-});
+if (hamburger && navbarMenu) {
+    hamburger.addEventListener('click', () => {
+        navbarMenu.classList.toggle('active');
+    });
+}
 
 // Cerrar menú al hacer click en un link
 const navLinks = document.querySelectorAll('.nav-link');
 navLinks.forEach(link => {
     link.addEventListener('click', () => {
-        navbarMenu.classList.remove('active');
+        if (navbarMenu) {
+            navbarMenu.classList.remove('active');
+        }
     });
 });
 
@@ -177,6 +181,9 @@ function animarNumero(elemento) {
 // Cambiar color de navbar al hacer scroll
 window.addEventListener('scroll', () => {
     const navbar = document.querySelector('.navbar');
+    if (!navbar) {
+        return;
+    }
     if (window.scrollY > 50) {
         navbar.style.boxShadow = '0 5px 20px rgba(0, 0, 0, 0.2)';
     } else {

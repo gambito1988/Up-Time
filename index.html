@@ -261,11 +261,11 @@
                         </div>
                     </div>
                 </div>
-                <form class="contacto-form" id="formularioContacto">
-                    <input type="text" placeholder="Tu nombre" required>
-                    <input type="email" placeholder="Tu email" required>
-                    <input type="tel" placeholder="Tu teléfono">
-                    <textarea placeholder="Describe tu problema o solicitud" rows="5" required></textarea>
+                <form class="contacto-form" id="formularioContacto" method="post" action="/contacto">
+                    <input type="text" name="nombre" placeholder="Tu nombre" autocomplete="name" required>
+                    <input type="email" name="email" placeholder="Tu email" autocomplete="email" required>
+                    <input type="tel" name="telefono" placeholder="Tu teléfono" autocomplete="tel">
+                    <textarea name="mensaje" placeholder="Describe tu problema o solicitud" rows="5" required></textarea>
                     <button type="submit" class="btn btn-primary">Enviar Mensaje</button>
                 </form>
             </div>
