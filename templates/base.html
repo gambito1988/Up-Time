@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Up Time{% endblock %}</title>
+    <style>
+        :root { --ink: #152238; --muted: #64748b; --paper: #f7f8f4; --line: #dce3e8; --accent: #c58b34; --accent-dark: #8e5c16; --white: #fff; }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: radial-gradient(circle at top right, #fff6df, transparent 34rem), var(--paper); color: var(--ink); font: 16px/1.55 Georgia, serif; }
+        a { color: var(--accent-dark); }
+        header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem max(5vw, 1.25rem); border-bottom: 1px solid var(--line); background: rgba(255,255,255,.86); }
+        .brand { color: var(--ink); font-size: 1.35rem; font-weight: 700; text-decoration: none; letter-spacing: .04em; }
+        nav { display: flex; align-items: center; gap: 1rem; font: 600 .9rem/1.2 Arial, sans-serif; }
+        nav a { text-decoration: none; }
+        .page { width: min(1000px, 90vw); margin: 3.5rem auto; }
+        .narrow { width: min(460px, 90vw); }
+        .intro { margin-bottom: 2rem; }
+        h1, h2 { line-height: 1.1; margin-top: 0; }
+        h1 { font-size: clamp(2rem, 5vw, 3.6rem); }
+        h2 { font-size: 1.65rem; }
+        .muted { color: var(--muted); }
+        .panel { padding: clamp(1.5rem, 4vw, 2.5rem); border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.9); box-shadow: 0 18px 50px rgba(21,34,56,.07); }
+        form { display: grid; gap: 1rem; }
+        label { display: grid; gap: .4rem; font: 600 .86rem/1.2 Arial, sans-serif; }
+        input, textarea, select { width: 100%; padding: .82rem .9rem; border: 1px solid #cbd5df; border-radius: 8px; background: white; color: var(--ink); font: inherit; }
+        button, .button { display: inline-flex; justify-content: center; align-items: center; gap: .4rem; padding: .78rem 1.05rem; border: 0; border-radius: 8px; background: var(--accent); color: #201706; cursor: pointer; font: 700 .9rem/1.2 Arial, sans-serif; text-decoration: none; }
+        button:hover, .button:hover { background: #d99e42; }
+        .button.secondary { background: transparent; border: 1px solid var(--accent); color: var(--accent-dark); }
+        .alert { padding: .8rem 1rem; border-radius: 8px; background: #fff0ef; color: #a52c29; font: .92rem/1.4 Arial, sans-serif; }
+        .success { background: #edf8ef; color: #246439; }
+        .actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+        .card { padding: 1.35rem; border: 1px solid var(--line); border-radius: 12px; background: white; }
+        .price { margin: .8rem 0; color: var(--accent-dark); font: 700 1.9rem/1 Arial, sans-serif; }
+        table { width: 100%; border-collapse: collapse; font: .92rem/1.4 Arial, sans-serif; }
+        th, td { padding: .8rem .55rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+        th { color: var(--muted); font-size: .78rem; text-transform: uppercase; }
+        footer { width: min(1000px, 90vw); margin: 3rem auto; color: var(--muted); font: .82rem Arial, sans-serif; }
+        @media (max-width: 650px) { header { align-items: flex-start; flex-direction: column; } nav { flex-wrap: wrap; } table { display: block; overflow-x: auto; white-space: nowrap; } }
+    </style>
+</head>
+<body>
+<header>
+    <a class="brand" href="{{ url_for('home') }}">UP TIME</a>
+    <nav>
+        <a href="{{ url_for('memberships') }}">Membresías</a>
+        {% if session.get('user_id') %}<a href="{{ url_for('user_dashboard') }}">Mi cuenta</a>{% else %}<a href="{{ url_for('user_login') }}">Ingresar</a><a href="{{ url_for('user_register') }}">Registrarme</a>{% endif %}
+    </nav>
+</header>
+<main class="page {% block page_class %}{% endblock %}">
+    {% block content %}{% endblock %}
+</main>
+<footer>Up Time · Soporte técnico profesional en CABA</footer>
+</body>
+</html>

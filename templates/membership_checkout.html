@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Confirmar membresía | Up Time{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<section class="panel"><p class="muted">MODO DEMOSTRACIÓN</p><h1>{{ plan.name }}</h1><div class="price">${{ '%.0f'|format(plan.price) }} / mes</div><p>{{ plan.description }}</p><p class="alert">No se realizará ningún cobro real. Este paso solo registra tu intención hasta conectar Mercado Pago o Stripe.</p><form method="post" action="{{ url_for('confirm_membership') }}"><input type="hidden" name="plan" value="{{ plan_key }}"><button type="submit">Confirmar selección</button></form><p><a href="{{ url_for('memberships') }}">Cambiar plan</a></p></section>
+{% endblock %}

@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Membresía pendiente | Up Time{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<section class="panel"><p class="muted">SOLICITUD REGISTRADA</p><h1>{{ plan.name }} seleccionado</h1><p class="alert success">Tu solicitud quedó pendiente de pago. La membresía se activará cuando conectemos y confirmemos la pasarela de cobro.</p><a class="button" href="{{ url_for('user_dashboard') }}">Volver a mi cuenta</a></section>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Confirmación | Up Time{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<section class="panel">
+    {% if confirmed %}
+    <p class="muted">CUENTA ACTIVADA</p>
+    <h1>Email confirmado</h1>
+    <p class="alert success">Tu cuenta ya está lista para usar.</p>
+    <a class="button" href="{{ url_for('user_login') }}">Ingresar</a>
+    {% else %}
+    <h1>No pudimos confirmar el email</h1>
+    <p class="alert">{{ error }}</p>
+    <a href="{{ url_for('user_register') }}">Crear una cuenta nueva</a>
+    {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Confirma tu email | Up Time{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<section class="panel">
+    <p class="muted">CASI LISTO</p>
+    <h1>Confirma tu email</h1>
+    <p>Enviamos las instrucciones a <strong>{{ email }}</strong>. Debes confirmar tu dirección antes de ingresar.</p>
+    {% if confirmation_url %}
+    <div class="alert success"><strong>Modo desarrollo:</strong> el envío SMTP todavía no está configurado.</div>
+    <p><a class="button" href="{{ confirmation_url }}">Confirmar email ahora</a></p>
+    {% endif %}
+</section>
+{% endblock %}
