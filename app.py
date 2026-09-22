@@ -3,6 +3,7 @@ import os
 import secrets
 import smtplib
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -11,6 +12,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from email_validator import EmailNotValidError, validate_email
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -26,12 +29,18 @@ MEMBERSHIP_PLANS = {
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32))
+app.config["PREFERRED_URL_SCHEME"] = "https"
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+database_initialized = False
+database_init_lock = threading.Lock()
 
 
 @contextmanager
 def get_db():
     connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 5000")
     try:
         yield connection
         connection.commit()
@@ -79,6 +88,10 @@ def init_db():
         for column, definition in migrations.items():
             if column not in existing_columns:
                 connection.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique "
+            "ON users(email COLLATE NOCASE) WHERE email IS NOT NULL"
+        )
 
 
 def user_required(view):
@@ -103,7 +116,22 @@ def admin_required(view):
 
 @app.before_request
 def prepare_database():
-    init_db()
+    global database_initialized
+    if database_initialized:
+        return None
+    try:
+        with database_init_lock:
+            if not database_initialized:
+                init_db()
+                database_initialized = True
+    except sqlite3.Error:
+        app.logger.exception("No se pudo inicializar la base de datos")
+        if request.path == "/usuarios/registro" and request.method == "POST":
+            return render_template(
+                "user_register.html",
+                error="La base de datos no está disponible. Intenta nuevamente en unos minutos.",
+            ), 503
+        raise
 
 
 @app.get("/")
@@ -154,15 +182,16 @@ def send_confirmation_email(email, confirmation_url):
 
     message = EmailMessage()
     message["Subject"] = "Confirma tu email - Up Time"
-    message["From"] = smtp_user
+    message["From"] = os.environ.get("SMTP_FROM", smtp_user)
     message["To"] = email
     message.set_content(
         "Confirma tu cuenta de Up Time abriendo este enlace:\n\n"
         f"{confirmation_url}\n\nEste enlace vence en 24 horas."
     )
     try:
-        with smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT", "587"))) as server:
-            server.starttls()
+        with smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT", "587")), timeout=15) as server:
+            if os.environ.get("SMTP_USE_TLS", "true").lower() in {"1", "true", "yes"}:
+                server.starttls()
             server.login(smtp_user, smtp_password)
             server.send_message(message)
     except (OSError, smtplib.SMTPException, ValueError) as error:
@@ -181,10 +210,14 @@ def user_register():
 @app.post("/usuarios/registro")
 def user_register_submit():
     username = request.form.get("username", "").strip()
-    email = request.form.get("email", "").strip().lower()
+    raw_email = request.form.get("email", "").strip()
     password = request.form.get("password", "")
     password_confirmation = request.form.get("password_confirmation", "")
-    if not username or "@" not in email or len(password) < 8 or password != password_confirmation:
+    try:
+        email = validate_email(raw_email, check_deliverability=False).normalized.lower()
+    except EmailNotValidError:
+        email = ""
+    if not username or not email or len(password) < 8 or password != password_confirmation:
         return render_template(
             "user_register.html",
             error="Completa los datos y usa una contraseña de al menos 8 caracteres.",
@@ -220,14 +253,46 @@ def user_register_submit():
             "user_register.html",
             error="No se pudo crear la cuenta en este momento. Intenta nuevamente.",
         ), 503
+    except Exception:
+        app.logger.exception("Error inesperado durante el registro")
+        return render_template(
+            "user_register.html",
+            error="No se pudo crear la cuenta en este momento. Intenta nuevamente.",
+        ), 503
 
     confirmation_url = url_for("confirm_email", token=token, _external=True)
     email_sent = send_confirmation_email(email, confirmation_url)
     return render_template(
         "registration_complete.html",
         email=email,
-        confirmation_url=confirmation_url if not email_sent else None,
+        email_sent=email_sent,
     )
+
+
+@app.post("/usuarios/reenviar-confirmacion")
+def resend_confirmation_email():
+    try:
+        email = validate_email(
+            request.form.get("email", "").strip(), check_deliverability=False
+        ).normalized.lower()
+    except EmailNotValidError:
+        email = ""
+
+    if email:
+        token = secrets.token_urlsafe(32)
+        expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        with get_db() as connection:
+            user = connection.execute(
+                "SELECT id FROM users WHERE email = ? AND email_confirmed = 0", (email,)
+            ).fetchone()
+            if user:
+                connection.execute(
+                    "UPDATE users SET confirmation_token = ?, confirmation_expires = ? WHERE id = ?",
+                    (token, expires, user["id"]),
+                )
+                confirmation_url = url_for("confirm_email", token=token, _external=True)
+                send_confirmation_email(email, confirmation_url)
+    return render_template("registration_complete.html", email=email or "esa dirección", email_sent=True)
 
 
 @app.get("/usuarios/confirmar-email/<token>")
