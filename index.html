@@ -255,19 +255,15 @@
                         <i class="fab fa-whatsapp"></i>
                         <div>
                             <h4>WhatsApp</h4>
-<<<<<<< HEAD
-                            <p><a href="https://wa.me/541161471426" target="_blank">Contactar por WhatsApp</a></p>
-=======
-                            <p><a href="https://wa.me/5491161471426" target="_blank">Contactar por WhatsApp</a></p>
->>>>>>> 38a2ab2 (Actualizar landing page)
+                            <p><a href="https://wa.me/5491161471426" target="_blank" rel="noopener noreferrer">Contactar por WhatsApp</a></p>
                         </div>
                     </div>
                 </div>
-                <form class="contacto-form" id="formularioContacto">
-                    <input type="text" placeholder="Tu nombre" required>
-                    <input type="email" placeholder="Tu email" required>
-                    <input type="tel" placeholder="Tu teléfono">
-                    <textarea placeholder="Describe tu problema o solicitud" rows="5" required></textarea>
+                <form class="contacto-form" id="formularioContacto" action="/contacto" method="post">
+                    <input type="text" name="nombre" placeholder="Tu nombre" required>
+                    <input type="email" name="email" placeholder="Tu email" required>
+                    <input type="tel" name="telefono" placeholder="Tu teléfono">
+                    <textarea name="mensaje" placeholder="Describe tu problema o solicitud" rows="5" required></textarea>
                     <button type="submit" class="btn btn-primary">Enviar Mensaje</button>
                 </form>
             </div>

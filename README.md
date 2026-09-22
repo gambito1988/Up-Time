@@ -16,11 +16,26 @@ Sitio web profesional para **Up Time**, empresa de soporte técnico y reparació
 
 ```
 Up-Time/
+├── app.py           # Servidor Flask y endpoint de contacto
 ├── index.html       # Página principal
 ├── styles.css       # Estilos y diseño
 ├── script.js        # Funcionalidad e interactividad
+├── requirements.txt  # Dependencias Python
 └── README.md        # Este archivo
 ```
+
+## 🐍 Ejecutar con Python
+
+Se utiliza Flask para servir la página y procesar el formulario de contacto.
+
+```bash
+python -m venv .venv
+.venv\\Scripts\\activate
+python -m pip install -r requirements.txt
+python app.py
+```
+
+Luego abre `http://127.0.0.1:5000` en el navegador. El formulario envía los datos al endpoint `POST /contacto`, que genera el mensaje y redirige a WhatsApp.
 
 ## 🎨 Paleta de Colores
 
@@ -90,9 +105,9 @@ El sitio se adapta automáticamente a:
 ## 🔧 Personalización
 
 ### Cambiar número de WhatsApp
-En `script.js`, línea 33:
-```javascript
-const numeroWhatsApp = '541234567890'; // Cambiar este número
+En `app.py`, modifica `WHATSAPP_NUMBER`:
+```python
+WHATSAPP_NUMBER = "5491161471426"
 ```
 
 ### Cambiar información de contacto

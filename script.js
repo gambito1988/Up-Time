@@ -29,39 +29,6 @@ function toggleFAQ(element) {
     faqItem.classList.toggle('active');
 }
 
-// Formulario de contacto
-const formularioContacto = document.getElementById('formularioContacto');
-
-formularioContacto.addEventListener('submit', (e) => {
-    e.preventDefault();
-    
-    const nombre = formularioContacto.querySelector('input[type="text"]').value;
-    const email = formularioContacto.querySelector('input[type="email"]').value;
-    const telefono = formularioContacto.querySelector('input[type="tel"]').value;
-    const mensaje = formularioContacto.querySelector('textarea').value;
-    
-    // Crear el cuerpo del mensaje para WhatsApp
-    const textoWhatsApp = `Hola, me gustaría contactarme con Up Time.\n\nNombre: ${nombre}\nEmail: ${email}\nTeléfono: ${telefono}\n\nMensaje: ${mensaje}`;
-    
-    // Codificar el mensaje para la URL
-    const mensajeEncodificado = encodeURIComponent(textoWhatsApp);
-    
-    // Número de WhatsApp (reemplazar con tu número)
-    const numeroWhatsApp = '541234567890';
-    
-    // Crear URL de WhatsApp
-    const urlWhatsApp = `https://wa.me/${numeroWhatsApp}?text=${mensajeEncodificado}`;
-    
-    // Abrir WhatsApp
-    window.open(urlWhatsApp, '_blank');
-    
-    // Limpiar formulario
-    formularioContacto.reset();
-    
-    // Mostrar mensaje de confirmación
-    mostrarAlerta('Redirigiendo a WhatsApp...', 'success');
-});
-
 // Función para mostrar alertas
 function mostrarAlerta(mensaje, tipo = 'info') {
     const alerta = document.createElement('div');
