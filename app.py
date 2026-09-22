@@ -15,7 +15,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DATABASE_PATH = BASE_DIR / "uptime.db"
+DATABASE_PATH = Path(os.environ.get("DATABASE_PATH", BASE_DIR / "uptime.db"))
 WHATSAPP_NUMBER = "5491161471426"
 PUBLIC_ASSETS = {"index.html", "styles.css", "script.js"}
 MEMBERSHIP_PLANS = {
@@ -410,4 +410,8 @@ def admin_dashboard():
 
 
 if __name__ == "__main__":
-    app.run(debug=os.environ.get("FLASK_DEBUG") == "1")
+    app.run(
+        debug=os.environ.get("FLASK_DEBUG") == "1",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "5000")),
+    )
