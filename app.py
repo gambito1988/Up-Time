@@ -165,7 +165,8 @@ def send_confirmation_email(email, confirmation_url):
             server.starttls()
             server.login(smtp_user, smtp_password)
             server.send_message(message)
-    except (OSError, smtplib.SMTPException, ValueError):
+    except (OSError, smtplib.SMTPException, ValueError) as error:
+        app.logger.warning("No se pudo enviar el email de confirmacion: %s", error)
         return False
     return True
 
@@ -191,20 +192,34 @@ def user_register_submit():
 
     token = secrets.token_urlsafe(32)
     expires = datetime.now(timezone.utc) + timedelta(hours=24)
-    with get_db() as connection:
-        existing = connection.execute(
-            "SELECT id FROM users WHERE lower(email) = ?", (email,)
-        ).fetchone()
-        if existing:
-            return render_template("user_register.html", error="Ese email ya está registrado."), 409
-        connection.execute(
-            """
-            INSERT INTO users (username, email, password_hash, email_confirmed,
-                confirmation_token, confirmation_expires)
-            VALUES (?, ?, ?, 0, ?, ?)
-            """,
-            (username, email, generate_password_hash(password), token, expires.isoformat()),
-        )
+    try:
+        with get_db() as connection:
+            existing_email = connection.execute(
+                "SELECT id FROM users WHERE lower(email) = ?", (email,)
+            ).fetchone()
+            if existing_email:
+                return render_template("user_register.html", error="Ese email ya está registrado."), 409
+            existing_username = connection.execute(
+                "SELECT id FROM users WHERE lower(username) = ?", (username.lower(),)
+            ).fetchone()
+            if existing_username:
+                return render_template("user_register.html", error="Ese nombre de usuario ya está registrado."), 409
+            connection.execute(
+                """
+                INSERT INTO users (username, email, password_hash, email_confirmed,
+                    confirmation_token, confirmation_expires)
+                VALUES (?, ?, ?, 0, ?, ?)
+                """,
+                (username, email, generate_password_hash(password), token, expires.isoformat()),
+            )
+    except sqlite3.IntegrityError:
+        return render_template("user_register.html", error="El usuario o email ya está registrado."), 409
+    except sqlite3.Error:
+        app.logger.exception("No se pudo guardar el nuevo usuario")
+        return render_template(
+            "user_register.html",
+            error="No se pudo crear la cuenta en este momento. Intenta nuevamente.",
+        ), 503
 
     confirmation_url = url_for("confirm_email", token=token, _external=True)
     email_sent = send_confirmation_email(email, confirmation_url)
