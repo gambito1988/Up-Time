@@ -2,5 +2,5 @@
 {% block title %}Membresía pendiente | Up Time{% endblock %}
 {% block page_class %}narrow{% endblock %}
 {% block content %}
-<section class="panel"><p class="muted">SOLICITUD REGISTRADA</p><h1>{{ plan.name }} seleccionado</h1><p class="alert success">Tu solicitud quedó pendiente de pago. La membresía se activará cuando conectemos y confirmemos la pasarela de cobro.</p><a class="button" href="{{ url_for('user_dashboard') }}">Volver a mi cuenta</a></section>
+<section class="panel">{% if approved %}<p class="muted">PAGO APROBADO</p><h1>Membresía activada</h1><p class="alert success">Confirmamos tu pago. Tu membresía ya está activa.</p>{% else %}<p class="muted">PAGO EN PROCESO</p><h1>Estamos verificando tu pago</h1><p class="alert success">Mercado Pago nos avisará cuando el pago sea aprobado. Actualizaremos tu membresía automáticamente.</p>{% endif %}<a class="button" href="{{ url_for('user_dashboard') }}">Volver a mi cuenta</a></section>
 {% endblock %}

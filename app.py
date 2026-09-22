@@ -1,9 +1,12 @@
 import hmac
+import json
 import os
 import secrets
 import smtplib
 import sqlite3
 import threading
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -68,6 +71,20 @@ def init_db():
                 payment REAL NOT NULL DEFAULT 0,
                 service_history TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            );
+
+            CREATE TABLE IF NOT EXISTS membership_payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payment_reference TEXT NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL,
+                plan TEXT NOT NULL,
+                amount REAL NOT NULL,
+                preference_id TEXT,
+                mp_payment_id TEXT UNIQUE,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                paid_at TEXT,
                 FOREIGN KEY (user_id) REFERENCES users (id)
             );
             """
@@ -198,6 +215,57 @@ def send_confirmation_email(email, confirmation_url):
         app.logger.warning("No se pudo enviar el email de confirmacion: %s", error)
         return False
     return True
+
+
+def mercado_pago_request(path, method="GET", payload=None):
+    access_token = os.environ.get("MERCADOPAGO_ACCESS_TOKEN")
+    if not access_token:
+        raise RuntimeError("Mercado Pago no está configurado.")
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request_data = Request(
+        f"https://api.mercadopago.com{path}",
+        data=data,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urlopen(request_data, timeout=15) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, ValueError) as error:
+        app.logger.warning("Error al comunicarse con Mercado Pago: %s", error)
+        raise RuntimeError("No se pudo iniciar o verificar el pago. Intenta nuevamente.") from error
+
+
+def apply_mercado_pago_payment(payment_id):
+    payment = mercado_pago_request(f"/v1/payments/{payment_id}")
+    reference = payment.get("external_reference")
+    if not reference:
+        return False
+    with get_db() as connection:
+        order = connection.execute(
+            "SELECT * FROM membership_payments WHERE payment_reference = ?", (reference,)
+        ).fetchone()
+        if not order:
+            return False
+        if payment.get("status") == "approved":
+            connection.execute(
+                "UPDATE membership_payments SET mp_payment_id = ?, status = 'approved', paid_at = ? WHERE id = ?",
+                (str(payment_id), datetime.now(timezone.utc).isoformat(), order["id"]),
+            )
+            connection.execute(
+                "UPDATE users SET membership_plan = ?, membership_status = 'active', membership_started_at = ? WHERE id = ?",
+                (order["plan"], datetime.now(timezone.utc).isoformat(), order["user_id"]),
+            )
+            return True
+        connection.execute(
+            "UPDATE membership_payments SET mp_payment_id = ?, status = ? WHERE id = ?",
+            (str(payment_id), payment.get("status", "pending"), order["id"]),
+        )
+    return False
 
 
 @app.get("/usuarios/registro")
@@ -398,13 +466,91 @@ def confirm_membership():
     plan = request.form.get("plan", "")
     if plan not in MEMBERSHIP_PLANS:
         return redirect(url_for("memberships"))
-    now = datetime.now(timezone.utc).isoformat()
+    plan_data = MEMBERSHIP_PLANS[plan]
+    if not os.environ.get("MERCADOPAGO_ACCESS_TOKEN"):
+        return render_template(
+            "membership_checkout.html",
+            plan=plan_data,
+            plan_key=plan,
+            error="El medio de pago aún no está configurado. Intenta nuevamente más tarde.",
+        ), 503
+    payment_reference = secrets.token_urlsafe(24)
+    with get_db() as connection:
+        user = connection.execute(
+            "SELECT username, email FROM users WHERE id = ?", (session["user_id"],)
+        ).fetchone()
+        connection.execute(
+            "INSERT INTO membership_payments (payment_reference, user_id, plan, amount) VALUES (?, ?, ?, ?)",
+            (payment_reference, session["user_id"], plan, plan_data["price"]),
+        )
+    try:
+        preference = mercado_pago_request(
+            "/checkout/preferences",
+            method="POST",
+            payload={
+                "items": [{
+                    "id": f"membership-{plan}",
+                    "title": f"Membresía Up Time - {plan_data['name']}",
+                    "quantity": 1,
+                    "currency_id": "ARS",
+                    "unit_price": plan_data["price"],
+                }],
+                "payer": {"name": user["username"], "email": user["email"]},
+                "external_reference": payment_reference,
+                "back_urls": {
+                    "success": url_for("membership_payment_result", _external=True),
+                    "failure": url_for("membership_payment_result", _external=True),
+                    "pending": url_for("membership_payment_result", _external=True),
+                },
+                "notification_url": url_for("mercado_pago_webhook", _external=True),
+            },
+        )
+    except RuntimeError as error:
+        return render_template("membership_checkout.html", plan=plan_data, plan_key=plan, error=str(error)), 503
+
+    checkout_url = preference.get(
+        "sandbox_init_point" if os.environ.get("MERCADOPAGO_SANDBOX", "").lower() in {"1", "true", "yes"} else "init_point"
+    )
+    if not checkout_url:
+        app.logger.error("Mercado Pago no devolvió una URL de checkout: %s", preference)
+        return render_template("membership_checkout.html", plan=plan_data, plan_key=plan, error="No se pudo iniciar el pago."), 503
     with get_db() as connection:
         connection.execute(
-            "UPDATE users SET membership_plan = ?, membership_status = 'pending_payment', membership_started_at = ? WHERE id = ?",
-            (plan, now, session["user_id"]),
+            "UPDATE membership_payments SET preference_id = ? WHERE payment_reference = ?",
+            (preference.get("id"), payment_reference),
         )
-    return render_template("membership_pending.html", plan=MEMBERSHIP_PLANS[plan])
+    return redirect(checkout_url, code=303)
+
+
+@app.post("/pagos/mercado-pago/webhook")
+def mercado_pago_webhook():
+    notification = request.get_json(silent=True) or {}
+    payment_id = (
+        notification.get("data", {}).get("id")
+        or request.args.get("data.id")
+        or request.args.get("id")
+    )
+    notification_type = notification.get("type") or request.args.get("type") or request.args.get("topic")
+    if payment_id and notification_type in {"payment", None}:
+        try:
+            apply_mercado_pago_payment(payment_id)
+        except RuntimeError:
+            # Mercado Pago reintentará el webhook si respondemos con error.
+            return "", 500
+    return "", 200
+
+
+@app.get("/membresias/pago/resultado")
+@user_required
+def membership_payment_result():
+    payment_id = request.args.get("payment_id") or request.args.get("collection_id")
+    approved = False
+    if payment_id:
+        try:
+            approved = apply_mercado_pago_payment(payment_id)
+        except RuntimeError:
+            pass
+    return render_template("membership_pending.html", approved=approved)
 
 
 @app.get("/gestion-privada")
