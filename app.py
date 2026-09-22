@@ -303,11 +303,12 @@ def memberships():
 
 
 @app.post("/membresias/seleccionar")
-@user_required
 def select_membership():
     plan = request.form.get("plan", "")
     if plan not in MEMBERSHIP_PLANS:
         return redirect(url_for("memberships"))
+    if not session.get("user_id"):
+        return redirect(url_for("user_login", next=url_for("memberships")))
     return render_template("membership_checkout.html", plan=MEMBERSHIP_PLANS[plan], plan_key=plan)
 
 
