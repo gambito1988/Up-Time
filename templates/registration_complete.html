@@ -4,14 +4,19 @@
 {% block content %}
 <section class="panel">
     <p class="muted">CASI LISTO</p>
+    {% if claimed %}
+    <h1>Activa tu cuenta</h1>
+    <p>Ya teníamos tus datos cargados. Enviamos un enlace a <strong>{{ email }}</strong> para que elijas tu contraseña y actives la cuenta.</p>
+    {% else %}
     <h1>Confirma tu email</h1>
     <p>Enviamos las instrucciones a <strong>{{ email }}</strong>. Debes confirmar tu dirección antes de ingresar.</p>
+    {% endif %}
     {% if not email_sent %}
     <p class="alert">No pudimos enviar el correo de confirmación. Revisa la configuración SMTP e inténtalo nuevamente.</p>
     {% endif %}
-    <form method="post" action="{{ url_for('resend_confirmation_email') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if not claimed %}<form method="post" action="{{ url_for('resend_confirmation_email') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="email" value="{{ email }}">
         <button class="secondary" type="submit">Reenviar correo de confirmación</button>
-    </form>
+    </form>{% endif %}
 </section>
 {% endblock %}

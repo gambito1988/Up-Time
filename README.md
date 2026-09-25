@@ -49,3 +49,9 @@ python -m pytest tests
 Cada pago aprobado suma 30 días de vigencia (`MEMBERSHIP_DAYS` en `app.py`); renovar antes del vencimiento suma sobre los días que quedan. Al vencer, la cuenta muestra "Vencida" y ofrece renovar. No hay cobro recurrente automático: el cliente paga cada período.
 
 En producción el webhook de Mercado Pago exige `MERCADOPAGO_WEBHOOK_SECRET` y rechaza las notificaciones si falta.
+
+## Cuentas de clientes cargadas por el administrador
+
+En el panel privado el admin puede cargar el email del cliente junto con el servicio. Cuando ese cliente se registra con **el mismo nombre y el mismo email**, no se crea un usuario nuevo: recibe un enlace (válido 1 hora) para elegir su contraseña, y al activarla ve el historial que ya tenía. La contraseña nunca se fija en el registro, así nadie puede apropiarse de la cuenta de otro escribiendo su email.
+
+Nombre de usuario y email son únicos sin distinguir mayúsculas. Un nombre cargado sin email no se puede reclamar: hay que agregar el email desde el panel (cargando otro servicio con el mismo nombre y el email).

@@ -359,3 +359,85 @@ def test_init_db_does_not_fail_when_legacy_duplicates_exist(db):
     run("INSERT INTO users (username) VALUES ('Luis'), ('luis')")
     db.init_db()  # no debe romper el arranque; deja el aviso en el log
     assert query("SELECT 1 FROM pg_indexes WHERE indexname = 'users_username_unique'") == []
+
+
+# --- Cuentas cargadas por el admin: el cliente las reclama con nombre + email ---
+
+def admin_client(app_ctx, monkeypatch):
+    admin = app_ctx.app.test_client()
+    admin_login(admin, monkeypatch)
+    return admin
+
+
+def activation_token(sent_emails):
+    return sent_emails[-1][2].split("/usuarios/restablecer/")[1].split()[0]
+
+
+def test_customer_claims_account_created_by_admin(db, client, sent_emails, app_ctx, monkeypatch):
+    admin = admin_client(app_ctx, monkeypatch)
+    admin.post("/gestion-privada/panel", data={**RECORD, "username": "Carlos", "email": "Carlos@Example.com"})
+    assert query("SELECT email FROM users")[0]["email"] == "carlos@example.com"
+
+    response = register(client, username="carlos", email="carlos@example.com", password="lo-que-sea-123")
+    assert response.status_code == 200 and "Activa tu cuenta".encode() in response.data
+    user = query("SELECT * FROM users")[0]
+    assert user["password_hash"] is None and len(query("SELECT id FROM users")) == 1
+    assert login(client, email="carlos@example.com", password="lo-que-sea-123").status_code == 401
+
+    token = activation_token(sent_emails)
+    assert client.post(f"/usuarios/restablecer/{token}", data={
+        "password": "mi-clave-nueva-1", "password_confirmation": "mi-clave-nueva-1"}).status_code == 200
+    assert query("SELECT email_confirmed FROM users")[0]["email_confirmed"] is True
+    assert login(client, email="carlos@example.com", password="mi-clave-nueva-1").status_code == 302
+    assert b"Limpieza" in client.get("/usuarios").data  # ve el historial que cargó el admin
+
+
+def test_claim_requires_matching_name_and_email(db, client, sent_emails, app_ctx, monkeypatch):
+    admin = admin_client(app_ctx, monkeypatch)
+    admin.post("/gestion-privada/panel", data={**RECORD, "username": "Carlos", "email": "carlos@example.com"})
+    admin.post("/gestion-privada/panel", data={**RECORD, "username": "SinEmail"})
+
+    assert register(client, username="otro", email="carlos@example.com").status_code == 409
+    assert register(client, username="Carlos", email="otro@example.com").status_code == 409
+    assert register(client, username="SinEmail", email="sinemail@example.com").status_code == 409
+    assert sent_emails == []
+    assert query("SELECT count(*) AS n FROM users WHERE password_hash IS NOT NULL")[0]["n"] == 0
+
+
+def test_activated_account_cannot_be_claimed_again(db, client, sent_emails, app_ctx, monkeypatch):
+    admin = admin_client(app_ctx, monkeypatch)
+    admin.post("/gestion-privada/panel", data={**RECORD, "username": "Carlos", "email": "carlos@example.com"})
+    register(client, username="Carlos", email="carlos@example.com")
+    client.post(f"/usuarios/restablecer/{activation_token(sent_emails)}", data={
+        "password": "mi-clave-nueva-1", "password_confirmation": "mi-clave-nueva-1"})
+    sent_emails.clear()
+    other = app_ctx.app.test_client()
+    assert register(other, username="Carlos", email="carlos@example.com").status_code == 409
+    assert sent_emails == []
+
+
+def test_activation_link_expires(db, client, sent_emails, app_ctx, monkeypatch):
+    admin = admin_client(app_ctx, monkeypatch)
+    admin.post("/gestion-privada/panel", data={**RECORD, "username": "Carlos", "email": "carlos@example.com"})
+    register(client, username="Carlos", email="carlos@example.com")
+    query("UPDATE users SET reset_expires = now() - interval '1 minute' RETURNING id")
+    assert client.get(f"/usuarios/restablecer/{activation_token(sent_emails)}").status_code == 400
+
+
+def test_admin_adds_email_to_existing_customer_and_rejects_conflicts(db, app_ctx, monkeypatch):
+    admin = admin_client(app_ctx, monkeypatch)
+    admin.post("/gestion-privada/panel", data={**RECORD, "username": "Ana"})
+    assert query("SELECT email FROM users")[0]["email"] is None
+
+    assert admin.post("/gestion-privada/panel", data={**RECORD, "username": "ana", "email": "ana@example.com"}
+                      ).status_code == 302
+    assert query("SELECT email FROM users")[0]["email"] == "ana@example.com"
+
+    assert admin.post("/gestion-privada/panel", data={**RECORD, "username": "ana", "email": "otro@example.com"}
+                      ).status_code == 400  # ya tiene otro email
+    assert admin.post("/gestion-privada/panel", data={**RECORD, "username": "beto", "email": "ANA@example.com"}
+                      ).status_code == 400  # el email es de otro cliente
+    assert admin.post("/gestion-privada/panel", data={**RECORD, "username": "beto", "email": "no-es-email"}
+                      ).status_code == 400
+    assert [row["username"] for row in query("SELECT username FROM users")] == ["Ana"]
+    assert len(query("SELECT id FROM service_records")) == 2  # las solicitudes rechazadas no guardan nada
