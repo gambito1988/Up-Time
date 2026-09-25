@@ -1,5 +1,7 @@
 __pycache__/
 .env
+.env.supa
 # Grafo local generado por graphify
 graphify-out/
 .pytest_cache/
+node_modules/
