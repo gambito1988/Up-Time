@@ -1,3 +1,5 @@
 uptime.db
 .env
 __pycache__/
+# Grafo local generado por graphify
+graphify-out/
