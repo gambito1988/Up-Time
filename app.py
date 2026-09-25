@@ -162,6 +162,21 @@ def init_db():
             "CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique "
             "ON users(LOWER(email)) WHERE email IS NOT NULL"
         )
+        # El nombre de usuario también es único sin distinguir mayúsculas. Si ya hubiera
+        # duplicados no se crea el índice (fallaría el arranque) y se avisa en el log.
+        duplicated = connection.execute(
+            "SELECT LOWER(username) AS username FROM users GROUP BY LOWER(username) HAVING COUNT(*) > 1"
+        ).fetchall()
+        if duplicated:
+            app.logger.error(
+                "Hay nombres de usuario repetidos (sin distinguir mayúsculas): %s. "
+                "Corrígelos para activar el índice único.",
+                ", ".join(row["username"] for row in duplicated),
+            )
+        else:
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(LOWER(username))"
+            )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS membership_payments_user_id_idx "
             "ON membership_payments(user_id)"
@@ -918,13 +933,13 @@ def admin_dashboard():
             ), 400
 
         with get_db() as connection:
-            connection.execute(
-                "INSERT INTO users (username) VALUES (%s) ON CONFLICT (username) DO NOTHING",
-                (username,),
-            )
-            user = connection.execute(
-                "SELECT id FROM users WHERE username = %s", (username,)
-            ).fetchone()
+            find_user = "SELECT id FROM users WHERE LOWER(username) = LOWER(%s)"
+            user = connection.execute(find_user, (username,)).fetchone()
+            if not user:
+                connection.execute(
+                    "INSERT INTO users (username) VALUES (%s) ON CONFLICT DO NOTHING", (username,)
+                )
+                user = connection.execute(find_user, (username,)).fetchone()
             connection.execute(
                 """
                 INSERT INTO service_records (user_id, job, payment, service_history)

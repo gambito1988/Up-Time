@@ -28,6 +28,7 @@ def db(app_ctx):
     app_ctx.init_db()
     with app_ctx.get_db() as connection:
         connection.execute("TRUNCATE membership_payments, service_records, users RESTART IDENTITY CASCADE")
+    app_ctx.init_db()  # recrea los índices que alguna prueba haya quitado
     return app_ctx
 
 
@@ -41,6 +42,11 @@ def sent_emails(monkeypatch):
 def query(sql, params=()):
     with app_module.get_db() as connection:
         return connection.execute(sql, params).fetchall()
+
+
+def run(sql):
+    with app_module.get_db() as connection:
+        connection.execute(sql)
 
 
 def register(client, username="ana", email="ana@example.com", password=PASSWORD):
@@ -320,3 +326,36 @@ def test_webhook_activates_membership_end_to_end(user_client, monkeypatch):
         "/pagos/mercado-pago/webhook", json={"type": "payment", "data": {"id": "111"}})
     assert response.status_code == 200
     assert query("SELECT membership_status FROM users")[0]["membership_status"] == "active"
+
+
+# --- Unicidad de nombre y email -------------------------------------------------
+
+def test_database_rejects_duplicate_username_and_email_ignoring_case(db):
+    query("INSERT INTO users (username, email) VALUES ('ana', 'ana@example.com') RETURNING id")
+    with pytest.raises(app_module.INTEGRITY_ERRORS):
+        query("INSERT INTO users (username) VALUES ('ANA') RETURNING id")
+    with pytest.raises(app_module.INTEGRITY_ERRORS):
+        query("INSERT INTO users (username, email) VALUES ('otra', 'ANA@example.com') RETURNING id")
+
+
+def test_admin_record_for_existing_name_in_other_case_reuses_the_user(user_client, app_ctx, monkeypatch):
+    admin = app_ctx.app.test_client()
+    admin_login(admin, monkeypatch)
+    assert admin.post("/gestion-privada/panel", data={**RECORD, "username": "  ANA "}).status_code == 302
+    assert len(query("SELECT id FROM users")) == 1
+    assert b"Limpieza" in user_client.get("/usuarios").data
+
+
+def test_registration_cannot_take_a_name_created_by_admin_in_other_case(db, client, sent_emails, app_ctx, monkeypatch):
+    admin = app_ctx.app.test_client()
+    admin_login(admin, monkeypatch)
+    admin.post("/gestion-privada/panel", data={**RECORD, "username": "Carlos"})
+    assert register(client, username="carlos", email="carlos@example.com").status_code == 409
+    assert len(query("SELECT id FROM users")) == 1
+
+
+def test_init_db_does_not_fail_when_legacy_duplicates_exist(db):
+    run("DROP INDEX users_username_unique")
+    run("INSERT INTO users (username) VALUES ('Luis'), ('luis')")
+    db.init_db()  # no debe romper el arranque; deja el aviso en el log
+    assert query("SELECT 1 FROM pg_indexes WHERE indexname = 'users_username_unique'") == []
