@@ -21,7 +21,6 @@ Complementos opcionales para trabajar en Up Time con Claude Code. Todos se insta
 
 ```bash
 uv tool install graphifyy                     # o: pipx install graphifyy (doble "y")
-graphify install --project --platform claude  # registra /graphify en este proyecto
 graphify update .                             # genera el grafo (solo código, sin tokens)
 graphify hook install                         # opcional: reconstruye al hacer commit/checkout
 ```
@@ -33,6 +32,10 @@ graphify explain "get_db()"
 graphify path "mercado_pago_webhook()" "get_db()"
 graphify query "¿qué depende de la conexión a la base de datos?"
 ```
+
+> **Python 3.14:** si `graphify update` falla con `'wrapper_descriptor' object has no attribute '__annotate__'`, reinstala con una versión anterior: `uv tool install --python 3.12 --force graphifyy`.
+
+La skill ya está registrada en el repositorio (`.claude/skills/graphify/`, hooks en `.claude/settings.json` y `CLAUDE.md`); cada desarrollador solo necesita tener la CLI instalada.
 
 La salida queda en `graphify-out/` (`graph.html`, `GRAPH_REPORT.md`, `graph.json`), excluida de Git.
 
