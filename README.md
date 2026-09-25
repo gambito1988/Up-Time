@@ -35,4 +35,17 @@ pip install -r requirements-dev.txt
 python -m pytest tests
 ```
 
-Las pruebas no necesitan una base de datos real: `tests/conftest.py` usa una cadena PostgreSQL ficticia y las consultas de pagos se simulan. Los flujos que sí tocan la base (registro, confirmación de email, login, panel de administración) todavía no tienen cobertura automatizada.
+Sin más configuración corren las pruebas unitarias (páginas, seguridad, firma del webhook y lógica de pagos con una base simulada). Las de integración (`tests/test_integration.py`: registro, confirmación de email, login, recuperación de contraseña, panel de administración y membresías) usan PostgreSQL real y se saltan si no defines una base de pruebas:
+
+```powershell
+$env:TEST_DATABASE_URL = "postgresql://postgres:clave@localhost:5432/uptime_test"
+python -m pytest tests
+```
+
+**Vacían las tablas** al empezar cada prueba, por eso solo se ejecutan si el nombre de la base contiene `test`.
+
+## Membresías
+
+Cada pago aprobado suma 30 días de vigencia (`MEMBERSHIP_DAYS` en `app.py`); renovar antes del vencimiento suma sobre los días que quedan. Al vencer, la cuenta muestra "Vencida" y ofrece renovar. No hay cobro recurrente automático: el cliente paga cada período.
+
+En producción el webhook de Mercado Pago exige `MERCADOPAGO_WEBHOOK_SECRET` y rechaza las notificaciones si falta.

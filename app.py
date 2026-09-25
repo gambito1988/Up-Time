@@ -37,6 +37,7 @@ MEMBERSHIP_PLANS = {
 }
 ADMIN_SESSION_SECONDS = 2 * 60 * 60
 PASSWORD_RESET_HOURS = 1
+MEMBERSHIP_DAYS = 30
 
 if not DATABASE_URL.startswith(("postgres://", "postgresql://")):
     raise RuntimeError("Define DATABASE_URL con la cadena de conexión PostgreSQL (postgresql://...).")
@@ -101,6 +102,7 @@ def init_db():
                 membership_plan TEXT,
                 membership_status TEXT NOT NULL DEFAULT 'inactive',
                 membership_started_at TIMESTAMPTZ,
+                membership_expires_at TIMESTAMPTZ,
                 reset_token_hash TEXT,
                 reset_expires TIMESTAMPTZ
             )
@@ -143,11 +145,19 @@ def init_db():
             "membership_plan": "TEXT",
             "membership_status": "TEXT NOT NULL DEFAULT 'inactive'",
             "membership_started_at": "TIMESTAMPTZ",
+            "membership_expires_at": "TIMESTAMPTZ",
             "reset_token_hash": "TEXT",
             "reset_expires": "TIMESTAMPTZ",
         }
         for column, definition in migrations.items():
             connection.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {column} {definition}")
+        # Membresías activadas antes de que existiera el vencimiento: cuentan desde su inicio.
+        connection.execute(
+            "UPDATE users SET membership_expires_at = membership_started_at + make_interval(days => %s) "
+            "WHERE membership_status = 'active' AND membership_expires_at IS NULL "
+            "AND membership_started_at IS NOT NULL",
+            (MEMBERSHIP_DAYS,),
+        )
         connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique "
             "ON users(LOWER(email)) WHERE email IS NOT NULL"
@@ -170,6 +180,16 @@ def parse_timestamp(value):
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value
+
+
+def membership_state(user):
+    """'active', 'expired' o 'inactive' según el estado guardado y la fecha de vencimiento."""
+    if user["membership_status"] != "active":
+        return "inactive"
+    expires = user.get("membership_expires_at")
+    if expires and parse_timestamp(expires) < datetime.now(timezone.utc):
+        return "expired"
+    return "active"
 
 
 def user_required(view):
@@ -406,8 +426,11 @@ def apply_mercado_pago_payment(payment_id, expected_user_id=None):
                 (payment_id, now, order["id"]),
             )
             connection.execute(
-                "UPDATE users SET membership_plan = %s, membership_status = 'active', membership_started_at = %s WHERE id = %s",
-                (order["plan"], now, order["user_id"]),
+                "UPDATE users SET membership_plan = %s, membership_status = 'active', "
+                "membership_started_at = %s, "
+                "membership_expires_at = GREATEST(COALESCE(membership_expires_at, %s), %s) + make_interval(days => %s) "
+                "WHERE id = %s",
+                (order["plan"], now, now, now, MEMBERSHIP_DAYS, order["user_id"]),
             )
             return True
 
@@ -435,6 +458,9 @@ def verify_mercado_pago_signature(data_id):
     """Valida la cabecera x-signature de los webhooks (HMAC-SHA256 con la clave secreta de MP)."""
     secret = os.environ.get("MERCADOPAGO_WEBHOOK_SECRET")
     if not secret:
+        if IS_PRODUCTION:
+            app.logger.error("MERCADOPAGO_WEBHOOK_SECRET no está configurada: se rechaza el webhook.")
+            return False
         app.logger.warning("MERCADOPAGO_WEBHOOK_SECRET no está configurada: no se verifica la firma.")
         return True
     parts = {}
@@ -686,7 +712,9 @@ def user_dashboard():
             "SELECT * FROM service_records WHERE user_id = %s ORDER BY created_at DESC, id DESC",
             (session["user_id"],),
         ).fetchall()
-    return render_template("user_dashboard.html", user=user, records=records)
+    return render_template(
+        "user_dashboard.html", user=user, records=records, membership_state=membership_state(user)
+    )
 
 
 @app.post("/usuarios/servicios/repetir/<int:record_id>")
@@ -852,6 +880,22 @@ def admin_logout():
     return redirect(url_for("admin_login"))
 
 
+def load_admin_data():
+    with get_db() as connection:
+        users = connection.execute(
+            "SELECT id, username, created_at FROM users ORDER BY username"
+        ).fetchall()
+        records = connection.execute(
+            """
+            SELECT service_records.*, users.username
+            FROM service_records
+            JOIN users ON users.id = service_records.user_id
+            ORDER BY service_records.created_at DESC, service_records.id DESC
+            """
+        ).fetchall()
+    return {"users": users, "records": records}
+
+
 @app.route("/gestion-privada/panel", methods=["GET", "POST"])
 @admin_required
 def admin_dashboard():
@@ -869,8 +913,7 @@ def admin_dashboard():
         if not username or not job or not service_history or payment < 0:
             return render_template(
                 "admin_dashboard.html",
-                users=[] ,
-                records=[],
+                **load_admin_data(),
                 error="Completa todos los campos y usa un pago valido.",
             ), 400
 
@@ -891,19 +934,7 @@ def admin_dashboard():
             )
         return redirect(url_for("admin_dashboard"))
 
-    with get_db() as connection:
-        users = connection.execute(
-            "SELECT id, username, created_at FROM users ORDER BY username"
-        ).fetchall()
-        records = connection.execute(
-            """
-            SELECT service_records.*, users.username
-            FROM service_records
-            JOIN users ON users.id = service_records.user_id
-            ORDER BY service_records.created_at DESC, service_records.id DESC
-            """
-        ).fetchall()
-    return render_template("admin_dashboard.html", users=users, records=records)
+    return render_template("admin_dashboard.html", **load_admin_data())
 
 
 if __name__ == "__main__":

@@ -305,3 +305,23 @@ def test_late_rejection_does_not_override_approved_order(fake_payment):
 
 def test_non_numeric_payment_id_is_rejected(app_ctx):
     assert app_ctx.apply_mercado_pago_payment("1; DROP TABLE users") is False
+
+
+# --- Webhook sin clave y vencimiento de membresías ------------------------------
+
+def test_webhook_without_secret_is_rejected_in_production(client, monkeypatch):
+    monkeypatch.delenv("MERCADOPAGO_WEBHOOK_SECRET", raising=False)
+    monkeypatch.setattr(app_module, "IS_PRODUCTION", True)
+    response = client.post("/pagos/mercado-pago/webhook?data.id=123&type=payment")
+    assert response.status_code == 401
+
+
+def test_membership_state():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    state = app_module.membership_state
+    assert state({"membership_status": "inactive"}) == "inactive"
+    assert state({"membership_status": "active", "membership_expires_at": now + timedelta(days=1)}) == "active"
+    assert state({"membership_status": "active", "membership_expires_at": now - timedelta(days=1)}) == "expired"
+    assert state({"membership_status": "active", "membership_expires_at": None}) == "active"

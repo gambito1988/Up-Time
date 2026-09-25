@@ -7,7 +7,7 @@
     <p class="muted">Aquí puedes revisar tus servicios y administrar tu membresía.</p>
 </div>
 <div class="grid">
-    <section class="card"><p class="muted">MEMBRESÍA ACTUAL</p><h2>{{ user.membership_plan|capitalize if user.membership_plan else 'Sin membresía' }}</h2><p>{{ user.membership_status|capitalize }}</p><a class="button secondary" href="{{ url_for('memberships') }}">Ver planes</a></section>
+    <section class="card"><p class="muted">MEMBRESÍA ACTUAL</p><h2>{{ user.membership_plan|capitalize if user.membership_plan else 'Sin membresía' }}</h2>{% if membership_state == 'active' %}<p>Activa{% if user.membership_expires_at %} hasta el {{ user.membership_expires_at.strftime('%d/%m/%Y') }}{% endif %}</p>{% elif membership_state == 'expired' %}<p>Vencida el {{ user.membership_expires_at.strftime('%d/%m/%Y') }}</p>{% else %}<p>Inactiva</p>{% endif %}<a class="button secondary" href="{{ url_for('memberships') }}">{{ 'Renovar' if membership_state != 'inactive' else 'Ver planes' }}</a></section>
     <section class="card"><p class="muted">EMAIL</p><h2>{{ user.email }}</h2><p class="muted">Email confirmado</p><form method="post" action="{{ url_for('user_logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Cerrar sesión</button></form></section>
 </div>
 <section class="panel" style="margin-top: 1.5rem;">
