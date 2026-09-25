@@ -2,3 +2,4 @@ __pycache__/
 .env
 # Grafo local generado por graphify
 graphify-out/
+.pytest_cache/

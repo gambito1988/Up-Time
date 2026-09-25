@@ -27,3 +27,12 @@ Configura `MERCADOPAGO_ACCESS_TOKEN` y, en el panel de Mercado Pago (Webhooks), 
 ## Herramientas para Claude Code
 
 Consulta [docs/herramientas-claude-code.md](docs/herramientas-claude-code.md) para instalar Graphify, claude-mem, Headroom, OmniRoute, claude-code-setup y task-observer.
+
+## Pruebas
+
+```powershell
+pip install -r requirements-dev.txt
+python -m pytest tests
+```
+
+Las pruebas no necesitan una base de datos real: `tests/conftest.py` usa una cadena PostgreSQL ficticia y las consultas de pagos se simulan. Los flujos que sí tocan la base (registro, confirmación de email, login, panel de administración) todavía no tienen cobertura automatizada.
