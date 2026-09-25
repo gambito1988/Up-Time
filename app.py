@@ -29,7 +29,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 BASE_DIR = Path(__file__).resolve().parent
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 WHATSAPP_NUMBER = "5491161471426"
-PUBLIC_ASSETS = {"index.html", "styles.css", "script.js"}
+PUBLIC_ASSETS = {"index.html", "styles.css"}
 MEMBERSHIP_PLANS = {
     "basic": {"name": "Basic", "price": 5000, "description": "Soporte remoto y prioridad estándar."},
     "intermedio": {"name": "Intermedio", "price": 9000, "description": "Soporte remoto y una visita mensual."},
@@ -37,6 +37,7 @@ MEMBERSHIP_PLANS = {
 }
 ADMIN_SESSION_SECONDS = 2 * 60 * 60
 PASSWORD_RESET_HOURS = 1
+MEMBERSHIP_DAYS = 30
 
 if not DATABASE_URL.startswith(("postgres://", "postgresql://")):
     raise RuntimeError("Define DATABASE_URL con la cadena de conexión PostgreSQL (postgresql://...).")
@@ -101,6 +102,7 @@ def init_db():
                 membership_plan TEXT,
                 membership_status TEXT NOT NULL DEFAULT 'inactive',
                 membership_started_at TIMESTAMPTZ,
+                membership_expires_at TIMESTAMPTZ,
                 reset_token_hash TEXT,
                 reset_expires TIMESTAMPTZ
             )
@@ -143,15 +145,38 @@ def init_db():
             "membership_plan": "TEXT",
             "membership_status": "TEXT NOT NULL DEFAULT 'inactive'",
             "membership_started_at": "TIMESTAMPTZ",
+            "membership_expires_at": "TIMESTAMPTZ",
             "reset_token_hash": "TEXT",
             "reset_expires": "TIMESTAMPTZ",
         }
         for column, definition in migrations.items():
             connection.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {column} {definition}")
+        # Membresías activadas antes de que existiera el vencimiento: cuentan desde su inicio.
+        connection.execute(
+            "UPDATE users SET membership_expires_at = membership_started_at + make_interval(days => %s) "
+            "WHERE membership_status = 'active' AND membership_expires_at IS NULL "
+            "AND membership_started_at IS NOT NULL",
+            (MEMBERSHIP_DAYS,),
+        )
         connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique "
             "ON users(LOWER(email)) WHERE email IS NOT NULL"
         )
+        # El nombre de usuario también es único sin distinguir mayúsculas. Si ya hubiera
+        # duplicados no se crea el índice (fallaría el arranque) y se avisa en el log.
+        duplicated = connection.execute(
+            "SELECT LOWER(username) AS username FROM users GROUP BY LOWER(username) HAVING COUNT(*) > 1"
+        ).fetchall()
+        if duplicated:
+            app.logger.error(
+                "Hay nombres de usuario repetidos (sin distinguir mayúsculas): %s. "
+                "Corrígelos para activar el índice único.",
+                ", ".join(row["username"] for row in duplicated),
+            )
+        else:
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(LOWER(username))"
+            )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS membership_payments_user_id_idx "
             "ON membership_payments(user_id)"
@@ -170,6 +195,16 @@ def parse_timestamp(value):
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value
+
+
+def membership_state(user):
+    """'active', 'expired' o 'inactive' según el estado guardado y la fecha de vencimiento."""
+    if user["membership_status"] != "active":
+        return "inactive"
+    expires = user.get("membership_expires_at")
+    if expires and parse_timestamp(expires) < datetime.now(timezone.utc):
+        return "expired"
+    return "active"
 
 
 def user_required(view):
@@ -327,6 +362,16 @@ def send_confirmation_email(email, confirmation_url):
     )
 
 
+def send_account_activation_email(email, activation_url):
+    return send_email(
+        email,
+        "Activa tu cuenta - Up Time",
+        "Ya tenemos tu historial de servicios en Up Time. Para activar tu cuenta y elegir "
+        f"tu contraseña abre este enlace:\n\n{activation_url}\n\n"
+        f"El enlace vence en {PASSWORD_RESET_HOURS} hora. Si no fuiste tú, ignora este mensaje.",
+    )
+
+
 def send_password_reset_email(email, reset_url):
     return send_email(
         email,
@@ -406,8 +451,11 @@ def apply_mercado_pago_payment(payment_id, expected_user_id=None):
                 (payment_id, now, order["id"]),
             )
             connection.execute(
-                "UPDATE users SET membership_plan = %s, membership_status = 'active', membership_started_at = %s WHERE id = %s",
-                (order["plan"], now, order["user_id"]),
+                "UPDATE users SET membership_plan = %s, membership_status = 'active', "
+                "membership_started_at = %s, "
+                "membership_expires_at = GREATEST(COALESCE(membership_expires_at, %s), %s) + make_interval(days => %s) "
+                "WHERE id = %s",
+                (order["plan"], now, now, now, MEMBERSHIP_DAYS, order["user_id"]),
             )
             return True
 
@@ -435,6 +483,9 @@ def verify_mercado_pago_signature(data_id):
     """Valida la cabecera x-signature de los webhooks (HMAC-SHA256 con la clave secreta de MP)."""
     secret = os.environ.get("MERCADOPAGO_WEBHOOK_SECRET")
     if not secret:
+        if IS_PRODUCTION:
+            app.logger.error("MERCADOPAGO_WEBHOOK_SECRET no está configurada: se rechaza el webhook.")
+            return False
         app.logger.warning("MERCADOPAGO_WEBHOOK_SECRET no está configurada: no se verifica la firma.")
         return True
     parts = {}
@@ -484,26 +535,45 @@ def user_register_submit():
 
     token = secrets.token_urlsafe(32)
     expires = datetime.now(timezone.utc) + timedelta(hours=24)
+    claim_token = None
     try:
         with get_db() as connection:
             existing_email = connection.execute(
-                "SELECT id FROM users WHERE lower(email) = %s", (email,)
+                "SELECT id, username, password_hash FROM users WHERE lower(email) = %s", (email,)
             ).fetchone()
             if existing_email:
-                return render_template("user_register.html", error="Ese email ya está registrado."), 409
-            existing_username = connection.execute(
-                "SELECT id FROM users WHERE lower(username) = %s", (username.lower(),)
-            ).fetchone()
-            if existing_username:
-                return render_template("user_register.html", error="Ese nombre de usuario ya está registrado."), 409
-            connection.execute(
-                """
-                INSERT INTO users (username, email, password_hash, email_confirmed,
-                    confirmation_token, confirmation_expires)
-                VALUES (%s, %s, %s, FALSE, %s, %s)
-                """,
-                (username, email, generate_password_hash(password), token, expires.isoformat()),
-            )
+                # Cuenta cargada por el administrador que nadie activó todavía: solo se reclama con
+                # el mismo nombre y email. La contraseña se elige desde un enlace enviado a ese
+                # email, así nadie puede quedarse con la cuenta de otro escribiendo su email.
+                claimable = (
+                    not existing_email["password_hash"]
+                    and existing_email["username"].lower() == username.lower()
+                )
+                if not claimable:
+                    return render_template("user_register.html", error="Ese email ya está registrado."), 409
+                claim_token = secrets.token_urlsafe(32)
+                connection.execute(
+                    "UPDATE users SET reset_token_hash = %s, reset_expires = %s WHERE id = %s",
+                    (
+                        hash_token(claim_token),
+                        datetime.now(timezone.utc) + timedelta(hours=PASSWORD_RESET_HOURS),
+                        existing_email["id"],
+                    ),
+                )
+            else:
+                existing_username = connection.execute(
+                    "SELECT id FROM users WHERE lower(username) = %s", (username.lower(),)
+                ).fetchone()
+                if existing_username:
+                    return render_template("user_register.html", error="Ese nombre de usuario ya está registrado."), 409
+                connection.execute(
+                    """
+                    INSERT INTO users (username, email, password_hash, email_confirmed,
+                        confirmation_token, confirmation_expires)
+                    VALUES (%s, %s, %s, FALSE, %s, %s)
+                    """,
+                    (username, email, generate_password_hash(password), token, expires.isoformat()),
+                )
     except INTEGRITY_ERRORS:
         return render_template("user_register.html", error="El usuario o email ya está registrado."), 409
     except DATABASE_ERRORS:
@@ -518,6 +588,12 @@ def user_register_submit():
             "user_register.html",
             error="No se pudo crear la cuenta en este momento. Intenta nuevamente.",
         ), 503
+
+    if claim_token:
+        email_sent = send_account_activation_email(
+            email, url_for("password_reset", token=claim_token, _external=True)
+        )
+        return render_template("registration_complete.html", email=email, email_sent=email_sent, claimed=True)
 
     confirmation_url = url_for("confirm_email", token=token, _external=True)
     email_sent = send_confirmation_email(email, confirmation_url)
@@ -661,7 +737,8 @@ def password_reset(token):
                 error = "Usa una contraseña de al menos 8 caracteres y repítela igual."
             else:
                 connection.execute(
-                    "UPDATE users SET password_hash = %s, reset_token_hash = NULL, reset_expires = NULL WHERE id = %s",
+                    "UPDATE users SET password_hash = %s, email_confirmed = TRUE, "
+                    "reset_token_hash = NULL, reset_expires = NULL WHERE id = %s",
                     (generate_password_hash(password), user["id"]),
                 )
                 return render_template("user_login.html", notice="Contraseña actualizada. Ya puedes ingresar.")
@@ -686,7 +763,9 @@ def user_dashboard():
             "SELECT * FROM service_records WHERE user_id = %s ORDER BY created_at DESC, id DESC",
             (session["user_id"],),
         ).fetchall()
-    return render_template("user_dashboard.html", user=user, records=records)
+    return render_template(
+        "user_dashboard.html", user=user, records=records, membership_state=membership_state(user)
+    )
 
 
 @app.post("/usuarios/servicios/repetir/<int:record_id>")
@@ -852,45 +931,7 @@ def admin_logout():
     return redirect(url_for("admin_login"))
 
 
-@app.route("/gestion-privada/panel", methods=["GET", "POST"])
-@admin_required
-def admin_dashboard():
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        job = request.form.get("job", "").strip()
-        service_history = request.form.get("service_history", "").strip()
-        payment_text = request.form.get("payment", "0").strip().replace(",", ".")
-
-        try:
-            payment = float(payment_text)
-        except ValueError:
-            payment = -1
-
-        if not username or not job or not service_history or payment < 0:
-            return render_template(
-                "admin_dashboard.html",
-                users=[] ,
-                records=[],
-                error="Completa todos los campos y usa un pago valido.",
-            ), 400
-
-        with get_db() as connection:
-            connection.execute(
-                "INSERT INTO users (username) VALUES (%s) ON CONFLICT (username) DO NOTHING",
-                (username,),
-            )
-            user = connection.execute(
-                "SELECT id FROM users WHERE username = %s", (username,)
-            ).fetchone()
-            connection.execute(
-                """
-                INSERT INTO service_records (user_id, job, payment, service_history)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (user["id"], job, payment, service_history),
-            )
-        return redirect(url_for("admin_dashboard"))
-
+def load_admin_data():
     with get_db() as connection:
         users = connection.execute(
             "SELECT id, username, created_at FROM users ORDER BY username"
@@ -903,7 +944,70 @@ def admin_dashboard():
             ORDER BY service_records.created_at DESC, service_records.id DESC
             """
         ).fetchall()
-    return render_template("admin_dashboard.html", users=users, records=records)
+    return {"users": users, "records": records}
+
+
+@app.route("/gestion-privada/panel", methods=["GET", "POST"])
+@admin_required
+def admin_dashboard():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        raw_email = request.form.get("email", "").strip()
+        job = request.form.get("job", "").strip()
+        service_history = request.form.get("service_history", "").strip()
+        payment_text = request.form.get("payment", "0").strip().replace(",", ".")
+
+        def form_error(message):
+            return render_template("admin_dashboard.html", **load_admin_data(), error=message), 400
+
+        try:
+            payment = float(payment_text)
+        except ValueError:
+            payment = -1
+
+        if not username or not job or not service_history or payment < 0:
+            return form_error("Completa todos los campos y usa un pago valido.")
+        email = None
+        if raw_email:
+            try:
+                email = validate_email(raw_email, check_deliverability=False).normalized.lower()
+            except EmailNotValidError:
+                return form_error("El email del cliente no es valido.")
+
+        try:
+            with get_db() as connection:
+                find_user = "SELECT id, email FROM users WHERE LOWER(username) = LOWER(%s)"
+                user = connection.execute(find_user, (username,)).fetchone()
+                if email:
+                    owner = connection.execute(
+                        "SELECT id FROM users WHERE LOWER(email) = %s", (email,)
+                    ).fetchone()
+                    if owner and (not user or owner["id"] != user["id"]):
+                        return form_error("Ese email ya pertenece a otro cliente.")
+                    if user and user["email"] and user["email"].lower() != email:
+                        return form_error("Ese cliente ya tiene otro email registrado.")
+                if not user:
+                    connection.execute(
+                        "INSERT INTO users (username, email) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                        (username, email),
+                    )
+                    user = connection.execute(find_user, (username,)).fetchone()
+                    if not user:
+                        return form_error("No se pudo crear el cliente: el nombre o el email ya existen.")
+                elif email and not user["email"]:
+                    connection.execute("UPDATE users SET email = %s WHERE id = %s", (email, user["id"]))
+                connection.execute(
+                    """
+                    INSERT INTO service_records (user_id, job, payment, service_history)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (user["id"], job, payment, service_history),
+                )
+        except INTEGRITY_ERRORS:
+            return form_error("No se pudo guardar: el nombre o el email ya existen.")
+        return redirect(url_for("admin_dashboard"))
+
+    return render_template("admin_dashboard.html", **load_admin_data())
 
 
 if __name__ == "__main__":
