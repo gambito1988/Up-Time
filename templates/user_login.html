@@ -5,13 +5,15 @@
 <section class="panel">
     <p class="muted">ÁREA DE CLIENTES</p>
     <h1>Ingresar</h1>
+    {% if notice %}<p class="alert success">{{ notice }}</p>{% endif %}
     {% if error %}<p class="alert">{{ error }}</p>{% endif %}
-    <form method="post">
+    <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="next" value="{{ request.args.get('next', '') }}">
         <label>Email <input name="email" type="email" required autocomplete="email"></label>
         <label>Contraseña <input name="password" type="password" required autocomplete="current-password"></label>
         <button type="submit">Entrar a mi cuenta</button>
     </form>
+    <p class="muted"><a href="{{ url_for('password_forgot') }}">¿Olvidaste tu contraseña?</a></p>
     <p class="muted">¿Todavía no tienes cuenta? <a href="{{ url_for('user_register') }}">Registrarme</a></p>
     <p class="muted">Al crear una cuenta debes confirmar tu email antes de ingresar.</p>
 </section>

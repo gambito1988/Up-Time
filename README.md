@@ -1,25 +1,28 @@
 # Up Time
 
-## Migración a Supabase PostgreSQL
+Sitio de servicio técnico (Flask + PostgreSQL) con cuentas de clientes, membresías pagas con Mercado Pago y un panel privado.
 
-1. Crea un proyecto en Supabase y copia la cadena de conexión **Session pooler** de PostgreSQL (puerto `5432`, incluye `sslmode=require`). Render opera sobre IPv4 y la conexión directa de Supabase requiere IPv6 salvo que se contrate su add-on IPv4.
-2. En Render, agrega `DATABASE_URL` en el servicio web con esa cadena. No la subas a Git.
-3. Desde una terminal con acceso a la base de Supabase, ejecuta primero la simulación:
+## Base de datos
 
-   ```powershell
-   $env:DATABASE_URL = "postgresql://..."
-   python scripts/migrate_sqlite_to_postgres.py
-   ```
+La aplicación usa **PostgreSQL** (Supabase). Define `DATABASE_URL` con la cadena **Session pooler** de Supabase (puerto `5432`, con `sslmode=require`); Render opera sobre IPv4 y la conexión directa de Supabase requiere IPv6. No subas la cadena a Git.
 
-4. Si los conteos son correctos, realiza la copia:
+El esquema se crea y actualiza solo al recibir la primera petición, y activa Row Level Security en todas las tablas.
 
-   ```powershell
-   python scripts/migrate_sqlite_to_postgres.py --apply
-   ```
+## Desarrollo local
 
-5. Recién entonces despliega el cambio en Render. La aplicación crea y actualiza el esquema al iniciar.
+```powershell
+pip install -r requirements.txt
+$env:DATABASE_URL = "postgresql://..."   # una base de desarrollo, no la de producción
+$env:SECRET_KEY = "cualquier-valor-largo"
+$env:ADMIN_USERNAME = "admin"; $env:ADMIN_PASSWORD = "clave"
+$env:FLASK_DEBUG = "1"; python app.py
+```
 
-Conserva `uptime.db` como respaldo hasta verificar usuarios, servicios y pagos en producción.
+Las variables disponibles están en `.env.example`. En Render, `SECRET_KEY` y `DATABASE_URL` son obligatorias: sin ellas la aplicación no arranca.
+
+## Mercado Pago
+
+Configura `MERCADOPAGO_ACCESS_TOKEN` y, en el panel de Mercado Pago (Webhooks), la URL `https://<tu-dominio>/pagos/mercado-pago/webhook`. Copia la clave secreta del webhook en `MERCADOPAGO_WEBHOOK_SECRET` para que se verifique la firma de cada notificación.
 
 ## Herramientas para Claude Code
 

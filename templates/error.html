@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} | Up Time{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<section class="panel">
+    <h1>{{ title }}</h1>
+    <p class="alert">{{ message }}</p>
+    <a class="button" href="{{ url_for('home') }}">Volver al inicio</a>
+</section>
+{% endblock %}

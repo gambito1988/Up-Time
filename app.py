@@ -1,36 +1,33 @@
+import hashlib
 import hmac
 import json
 import os
 import secrets
 import smtplib
-import sqlite3
 import threading
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
-from urllib.parse import quote
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlparse
+from urllib.request import Request, urlopen
 
-from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+import psycopg
 from email_validator import EmailNotValidError, validate_email
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFError, CSRFProtect
+from psycopg.rows import dict_row
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-try:
-    import psycopg
-    from psycopg.rows import dict_row
-except ImportError:  # Permite continuar usando SQLite en desarrollo local.
-    psycopg = None
-    dict_row = None
-
 
 BASE_DIR = Path(__file__).resolve().parent
-DATABASE_PATH = Path(os.environ.get("DATABASE_PATH", BASE_DIR / "uptime.db"))
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
-USING_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 WHATSAPP_NUMBER = "5491161471426"
 PUBLIC_ASSETS = {"index.html", "styles.css", "script.js"}
 MEMBERSHIP_PLANS = {
@@ -38,58 +35,45 @@ MEMBERSHIP_PLANS = {
     "intermedio": {"name": "Intermedio", "price": 9000, "description": "Soporte remoto y una visita mensual."},
     "premium": {"name": "Premium", "price": 15000, "description": "Atención prioritaria y dos visitas mensuales."},
 }
+ADMIN_SESSION_SECONDS = 2 * 60 * 60
+PASSWORD_RESET_HOURS = 1
+
+if not DATABASE_URL.startswith(("postgres://", "postgresql://")):
+    raise RuntimeError("Define DATABASE_URL con la cadena de conexión PostgreSQL (postgresql://...).")
 
 IS_PRODUCTION = bool(os.environ.get("RENDER")) or os.environ.get("APP_ENV") == "production"
-if IS_PRODUCTION:
-    # En producción no se admiten valores por defecto: una clave aleatoria invalida las
-    # sesiones en cada reinicio y SQLite sobre el disco efímero de Render pierde los datos.
-    _missing = [name for name in ("SECRET_KEY", "DATABASE_URL") if not os.environ.get(name)]
-    if _missing:
-        raise RuntimeError(f"Faltan variables de entorno obligatorias: {', '.join(_missing)}")
-    if not USING_POSTGRES:
-        raise RuntimeError("DATABASE_URL debe ser una cadena PostgreSQL (postgresql://...).")
+if IS_PRODUCTION and not os.environ.get("SECRET_KEY"):
+    # Una clave aleatoria invalida todas las sesiones en cada reinicio o entre workers.
+    raise RuntimeError("Falta la variable de entorno obligatoria SECRET_KEY.")
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32))
-app.config["PREFERRED_URL_SCHEME"] = "https"
+app.config.update(
+    SECRET_KEY=os.environ.get("SECRET_KEY", os.urandom(32)),
+    PREFERRED_URL_SCHEME="https",
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=IS_PRODUCTION,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=14),
+    WTF_CSRF_TIME_LIMIT=None,  # El token vive lo mismo que la sesión.
+    WTF_CSRF_SSL_STRICT=False,  # No exigir Referer: hay navegadores y extensiones que lo quitan.
+)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+csrf = CSRFProtect(app)
+# El almacenamiento en memoria es por proceso; con varios workers usa RATELIMIT_STORAGE_URI (Redis).
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
+)
 database_initialized = False
 database_init_lock = threading.Lock()
-DATABASE_ERRORS = (sqlite3.Error,) + ((psycopg.Error,) if psycopg else ())
-INTEGRITY_ERRORS = (sqlite3.IntegrityError,) + ((psycopg.IntegrityError,) if psycopg else ())
-
-
-class PostgresConnection:
-    """Compatibilidad mínima para conservar las consultas SQLite existentes."""
-
-    def __init__(self, connection):
-        self.connection = connection
-
-    def execute(self, query, parameters=()):
-        # La aplicación usa placeholders SQLite (?). Psycopg utiliza %s.
-        return self.connection.execute(query.replace("?", "%s"), parameters)
-
-    def commit(self):
-        self.connection.commit()
-
-    def rollback(self):
-        self.connection.rollback()
-
-    def close(self):
-        self.connection.close()
+DATABASE_ERRORS = (psycopg.Error,)
+INTEGRITY_ERRORS = (psycopg.IntegrityError,)
 
 
 @contextmanager
 def get_db():
-    if USING_POSTGRES:
-        if psycopg is None:
-            raise RuntimeError("Falta instalar psycopg para usar PostgreSQL.")
-        connection = PostgresConnection(psycopg.connect(DATABASE_URL, row_factory=dict_row))
-    else:
-        connection = sqlite3.connect(DATABASE_PATH)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 5000")
+    connection = psycopg.connect(DATABASE_URL, row_factory=dict_row)
     try:
         yield connection
         connection.commit()
@@ -101,67 +85,7 @@ def get_db():
 
 
 def init_db():
-    if USING_POSTGRES:
-        init_postgres_db()
-        return
-    with get_db() as connection:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS service_records (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                job TEXT NOT NULL,
-                payment REAL NOT NULL DEFAULT 0,
-                service_history TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (id)
-            );
-
-            CREATE TABLE IF NOT EXISTS membership_payments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                payment_reference TEXT NOT NULL UNIQUE,
-                user_id INTEGER NOT NULL,
-                plan TEXT NOT NULL,
-                amount REAL NOT NULL,
-                preference_id TEXT,
-                mp_payment_id TEXT UNIQUE,
-                status TEXT NOT NULL DEFAULT 'pending',
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                paid_at TEXT,
-                FOREIGN KEY (user_id) REFERENCES users (id)
-            );
-            """
-        )
-        existing_columns = {
-            row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()
-        }
-        migrations = {
-            "email": "TEXT",
-            "password_hash": "TEXT",
-            "email_confirmed": "INTEGER NOT NULL DEFAULT 0",
-            "confirmation_token": "TEXT",
-            "confirmation_expires": "TEXT",
-            "membership_plan": "TEXT",
-            "membership_status": "TEXT NOT NULL DEFAULT 'inactive'",
-            "membership_started_at": "TEXT",
-        }
-        for column, definition in migrations.items():
-            if column not in existing_columns:
-                connection.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
-        connection.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique "
-            "ON users(email COLLATE NOCASE) WHERE email IS NOT NULL"
-        )
-
-
-def init_postgres_db():
-    """Crea y actualiza el esquema de PostgreSQL sin depender de SQLite."""
+    """Crea y actualiza el esquema de PostgreSQL."""
     with get_db() as connection:
         connection.execute(
             """
@@ -176,7 +100,9 @@ def init_postgres_db():
                 confirmation_expires TIMESTAMPTZ,
                 membership_plan TEXT,
                 membership_status TEXT NOT NULL DEFAULT 'inactive',
-                membership_started_at TIMESTAMPTZ
+                membership_started_at TIMESTAMPTZ,
+                reset_token_hash TEXT,
+                reset_expires TIMESTAMPTZ
             )
             """
         )
@@ -217,6 +143,8 @@ def init_postgres_db():
             "membership_plan": "TEXT",
             "membership_status": "TEXT NOT NULL DEFAULT 'inactive'",
             "membership_started_at": "TIMESTAMPTZ",
+            "reset_token_hash": "TEXT",
+            "reset_expires": "TIMESTAMPTZ",
         }
         for column, definition in migrations.items():
             connection.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {column} {definition}")
@@ -236,7 +164,7 @@ def init_postgres_db():
 
 
 def parse_timestamp(value):
-    """Convierte el valor guardado (texto en SQLite, datetime en PostgreSQL) a datetime con zona."""
+    """Devuelve un datetime con zona horaria a partir de un datetime o de un texto ISO."""
     if isinstance(value, str):
         value = datetime.fromisoformat(value)
     if value.tzinfo is None:
@@ -254,14 +182,55 @@ def user_required(view):
     return wrapped
 
 
+def admin_session_active():
+    return bool(session.get("admin_authenticated")) and (
+        time.time() - session.get("admin_at", 0) < ADMIN_SESSION_SECONDS
+    )
+
+
 def admin_required(view):
+    @wraps(view)
     def wrapped(*args, **kwargs):
-        if not session.get("admin_authenticated"):
+        if not admin_session_active():
+            session.pop("admin_authenticated", None)
             return redirect(url_for("admin_login"))
         return view(*args, **kwargs)
 
-    wrapped.__name__ = view.__name__
     return wrapped
+
+
+def safe_next_url(value, default):
+    """Solo admite rutas relativas del propio sitio para evitar redirecciones abiertas."""
+    if not value or not value.startswith("/") or value.startswith("//") or "\\" in value or "%5c" in value.lower():
+        return default
+    if any(ord(char) < 32 for char in value):
+        return default
+    parsed = urlparse(value)
+    if parsed.scheme or parsed.netloc:
+        return default
+    return value
+
+
+def hash_token(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+@app.errorhandler(CSRFError)
+def csrf_error(error):
+    return render_template(
+        "error.html",
+        title="La página caducó",
+        message="No pudimos verificar el formulario. Vuelve atrás, recarga la página e inténtalo de nuevo.",
+    ), 400
+
+
+@app.errorhandler(429)
+def too_many_requests(error):
+    return render_template(
+        "error.html",
+        title="Demasiados intentos",
+        message="Hiciste demasiados intentos en poco tiempo. Espera unos minutos y vuelve a probar.",
+    ), 429
 
 
 @app.before_request
@@ -302,6 +271,8 @@ def assets(filename):
 
 
 @app.post("/contacto")
+@csrf.exempt  # Se envía desde la landing estática (otro origen) y solo redirige a WhatsApp.
+@limiter.limit("10 per hour")
 def contacto():
     nombre = request.form.get("nombre", "").strip()
     email = request.form.get("email", "").strip()
@@ -323,7 +294,7 @@ def contacto():
     )
 
 
-def send_confirmation_email(email, confirmation_url):
+def send_email(to, subject, body):
     smtp_host = os.environ.get("SMTP_HOST")
     smtp_user = os.environ.get("SMTP_USER")
     smtp_password = os.environ.get("SMTP_PASSWORD")
@@ -331,13 +302,10 @@ def send_confirmation_email(email, confirmation_url):
         return False
 
     message = EmailMessage()
-    message["Subject"] = "Confirma tu email - Up Time"
+    message["Subject"] = subject
     message["From"] = os.environ.get("SMTP_FROM", smtp_user)
-    message["To"] = email
-    message.set_content(
-        "Confirma tu cuenta de Up Time abriendo este enlace:\n\n"
-        f"{confirmation_url}\n\nEste enlace vence en 24 horas."
-    )
+    message["To"] = to
+    message.set_content(body)
     try:
         with smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT", "587")), timeout=15) as server:
             if os.environ.get("SMTP_USE_TLS", "true").lower() in {"1", "true", "yes"}:
@@ -345,9 +313,29 @@ def send_confirmation_email(email, confirmation_url):
             server.login(smtp_user, smtp_password)
             server.send_message(message)
     except (OSError, smtplib.SMTPException, ValueError) as error:
-        app.logger.warning("No se pudo enviar el email de confirmacion: %s", error)
+        app.logger.warning("No se pudo enviar el email '%s': %s", subject, error)
         return False
     return True
+
+
+def send_confirmation_email(email, confirmation_url):
+    return send_email(
+        email,
+        "Confirma tu email - Up Time",
+        "Confirma tu cuenta de Up Time abriendo este enlace:\n\n"
+        f"{confirmation_url}\n\nEste enlace vence en 24 horas.",
+    )
+
+
+def send_password_reset_email(email, reset_url):
+    return send_email(
+        email,
+        "Restablece tu contraseña - Up Time",
+        "Recibimos un pedido para restablecer tu contraseña de Up Time. "
+        "Si fuiste tú, abre este enlace:\n\n"
+        f"{reset_url}\n\nEl enlace vence en {PASSWORD_RESET_HOURS} hora. "
+        "Si no lo pediste, ignora este mensaje.",
+    )
 
 
 def mercado_pago_request(path, method="GET", payload=None):
@@ -373,32 +361,98 @@ def mercado_pago_request(path, method="GET", payload=None):
         raise RuntimeError("No se pudo iniciar o verificar el pago. Intenta nuevamente.") from error
 
 
-def apply_mercado_pago_payment(payment_id):
+REFUND_STATUSES = {"refunded", "charged_back", "cancelled"}
+
+
+def payment_matches_order(payment, order):
+    try:
+        paid_amount = float(payment.get("transaction_amount"))
+    except (TypeError, ValueError):
+        return False
+    return payment.get("currency_id") == "ARS" and abs(paid_amount - float(order["amount"])) < 0.01
+
+
+def apply_mercado_pago_payment(payment_id, expected_user_id=None):
+    """Sincroniza un pago de Mercado Pago con su pedido. Devuelve True si el pedido está aprobado."""
+    payment_id = str(payment_id)
+    if not payment_id.isdigit():
+        return False
     payment = mercado_pago_request(f"/v1/payments/{payment_id}")
     reference = payment.get("external_reference")
     if not reference:
         return False
+    status = payment.get("status", "pending")
+    now = datetime.now(timezone.utc)
     with get_db() as connection:
         order = connection.execute(
-            "SELECT * FROM membership_payments WHERE payment_reference = ?", (reference,)
+            "SELECT * FROM membership_payments WHERE payment_reference = %s FOR UPDATE", (reference,)
         ).fetchone()
         if not order:
             return False
-        if payment.get("status") == "approved":
+        if expected_user_id is not None and order["user_id"] != expected_user_id:
+            return False
+
+        if status == "approved":
+            if order["status"] == "approved":
+                return True  # Idempotente: el webhook y el regreso del usuario pueden llegar ambos.
+            if not payment_matches_order(payment, order):
+                app.logger.error(
+                    "El pago %s no coincide con el pedido %s (monto o moneda distintos).",
+                    payment_id, order["id"],
+                )
+                return False
             connection.execute(
-                "UPDATE membership_payments SET mp_payment_id = ?, status = 'approved', paid_at = ? WHERE id = ?",
-                (str(payment_id), datetime.now(timezone.utc).isoformat(), order["id"]),
+                "UPDATE membership_payments SET mp_payment_id = %s, status = 'approved', paid_at = %s WHERE id = %s",
+                (payment_id, now, order["id"]),
             )
             connection.execute(
-                "UPDATE users SET membership_plan = ?, membership_status = 'active', membership_started_at = ? WHERE id = ?",
-                (order["plan"], datetime.now(timezone.utc).isoformat(), order["user_id"]),
+                "UPDATE users SET membership_plan = %s, membership_status = 'active', membership_started_at = %s WHERE id = %s",
+                (order["plan"], now, order["user_id"]),
             )
             return True
+
+        if order["status"] == "approved":
+            # Un pago tardío o rechazado no debe pisar un pedido aprobado; solo un
+            # reembolso o contracargo del mismo pago desactiva la membresía.
+            if status in REFUND_STATUSES and order["mp_payment_id"] == payment_id:
+                connection.execute(
+                    "UPDATE membership_payments SET status = %s WHERE id = %s", (status, order["id"])
+                )
+                connection.execute(
+                    "UPDATE users SET membership_status = 'inactive' WHERE id = %s AND membership_plan = %s",
+                    (order["user_id"], order["plan"]),
+                )
+            return False
+
         connection.execute(
-            "UPDATE membership_payments SET mp_payment_id = ?, status = ? WHERE id = ?",
-            (str(payment_id), payment.get("status", "pending"), order["id"]),
+            "UPDATE membership_payments SET mp_payment_id = %s, status = %s WHERE id = %s",
+            (payment_id, status, order["id"]),
         )
     return False
+
+
+def verify_mercado_pago_signature(data_id):
+    """Valida la cabecera x-signature de los webhooks (HMAC-SHA256 con la clave secreta de MP)."""
+    secret = os.environ.get("MERCADOPAGO_WEBHOOK_SECRET")
+    if not secret:
+        app.logger.warning("MERCADOPAGO_WEBHOOK_SECRET no está configurada: no se verifica la firma.")
+        return True
+    parts = {}
+    for item in request.headers.get("x-signature", "").split(","):
+        key, _, value = item.strip().partition("=")
+        parts[key] = value
+    timestamp, received = parts.get("ts"), parts.get("v1")
+    if not timestamp or not received:
+        return False
+    manifest = ""
+    if data_id:
+        manifest += f"id:{data_id.lower()};"
+    request_id = request.headers.get("x-request-id")
+    if request_id:
+        manifest += f"request-id:{request_id};"
+    manifest += f"ts:{timestamp};"
+    expected = hmac.new(secret.encode("utf-8"), manifest.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, received)
 
 
 @app.get("/usuarios/registro")
@@ -409,6 +463,7 @@ def user_register():
 
 
 @app.post("/usuarios/registro")
+@limiter.limit("10 per hour")
 def user_register_submit():
     username = request.form.get("username", "").strip()
     raw_email = request.form.get("email", "").strip()
@@ -418,7 +473,10 @@ def user_register_submit():
         email = validate_email(raw_email, check_deliverability=False).normalized.lower()
     except EmailNotValidError:
         email = ""
-    if not username or not email or len(password) < 8 or password != password_confirmation:
+    if (
+        not username or len(username) > 100 or not email
+        or not 8 <= len(password) <= 128 or password != password_confirmation
+    ):
         return render_template(
             "user_register.html",
             error="Completa los datos y usa una contraseña de al menos 8 caracteres.",
@@ -429,12 +487,12 @@ def user_register_submit():
     try:
         with get_db() as connection:
             existing_email = connection.execute(
-                "SELECT id FROM users WHERE lower(email) = ?", (email,)
+                "SELECT id FROM users WHERE lower(email) = %s", (email,)
             ).fetchone()
             if existing_email:
                 return render_template("user_register.html", error="Ese email ya está registrado."), 409
             existing_username = connection.execute(
-                "SELECT id FROM users WHERE lower(username) = ?", (username.lower(),)
+                "SELECT id FROM users WHERE lower(username) = %s", (username.lower(),)
             ).fetchone()
             if existing_username:
                 return render_template("user_register.html", error="Ese nombre de usuario ya está registrado."), 409
@@ -442,7 +500,7 @@ def user_register_submit():
                 """
                 INSERT INTO users (username, email, password_hash, email_confirmed,
                     confirmation_token, confirmation_expires)
-                VALUES (?, ?, ?, FALSE, ?, ?)
+                VALUES (%s, %s, %s, FALSE, %s, %s)
                 """,
                 (username, email, generate_password_hash(password), token, expires.isoformat()),
             )
@@ -471,6 +529,7 @@ def user_register_submit():
 
 
 @app.post("/usuarios/reenviar-confirmacion")
+@limiter.limit("5 per hour")
 def resend_confirmation_email():
     try:
         email = validate_email(
@@ -484,11 +543,11 @@ def resend_confirmation_email():
         expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         with get_db() as connection:
             user = connection.execute(
-                "SELECT id FROM users WHERE lower(email) = ? AND email_confirmed = FALSE", (email,)
+                "SELECT id FROM users WHERE lower(email) = %s AND email_confirmed = FALSE", (email,)
             ).fetchone()
             if user:
                 connection.execute(
-                    "UPDATE users SET confirmation_token = ?, confirmation_expires = ? WHERE id = ?",
+                    "UPDATE users SET confirmation_token = %s, confirmation_expires = %s WHERE id = %s",
                     (token, expires, user["id"]),
                 )
                 confirmation_url = url_for("confirm_email", token=token, _external=True)
@@ -500,7 +559,7 @@ def resend_confirmation_email():
 def confirm_email(token):
     with get_db() as connection:
         user = connection.execute(
-            "SELECT id, confirmation_expires FROM users WHERE confirmation_token = ?",
+            "SELECT id, confirmation_expires FROM users WHERE confirmation_token = %s",
             (token,),
         ).fetchone()
         if not user:
@@ -509,7 +568,7 @@ def confirm_email(token):
         if expires < datetime.now(timezone.utc):
             return render_template("confirmation_result.html", error="El enlace ya vencio."), 400
         connection.execute(
-            "UPDATE users SET email_confirmed = TRUE, confirmation_token = NULL, confirmation_expires = NULL WHERE id = ?",
+            "UPDATE users SET email_confirmed = TRUE, confirmation_token = NULL, confirmation_expires = NULL WHERE id = %s",
             (user["id"],),
         )
     return render_template("confirmation_result.html", confirmed=True)
@@ -523,12 +582,13 @@ def user_login():
 
 
 @app.post("/usuarios/login")
+@limiter.limit("10 per minute;50 per hour")
 def user_login_submit():
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
     with get_db() as connection:
         user = connection.execute(
-            "SELECT id, password_hash, email_confirmed FROM users WHERE lower(email) = ?",
+            "SELECT id, password_hash, email_confirmed FROM users WHERE lower(email) = %s",
             (email,),
         ).fetchone()
     if not user or not user["password_hash"] or not check_password_hash(user["password_hash"], password):
@@ -536,11 +596,76 @@ def user_login_submit():
     if not user["email_confirmed"]:
         return render_template("user_login.html", error="Confirma tu email antes de ingresar."), 403
     session.clear()
+    session.permanent = True
     session["user_id"] = user["id"]
-    next_url = request.form.get("next", "")
-    if not next_url.startswith("/") or next_url.startswith("//"):
-        next_url = url_for("user_dashboard")
-    return redirect(next_url)
+    return redirect(safe_next_url(request.form.get("next", ""), url_for("user_dashboard")))
+
+
+@app.get("/usuarios/recuperar")
+def password_forgot():
+    return render_template("user_forgot.html")
+
+
+@app.post("/usuarios/recuperar")
+@limiter.limit("5 per hour")
+def password_forgot_submit():
+    try:
+        email = validate_email(
+            request.form.get("email", "").strip(), check_deliverability=False
+        ).normalized.lower()
+    except EmailNotValidError:
+        email = ""
+
+    token = None
+    if email:
+        token = secrets.token_urlsafe(32)
+        expires = datetime.now(timezone.utc) + timedelta(hours=PASSWORD_RESET_HOURS)
+        with get_db() as connection:
+            user = connection.execute(
+                "SELECT id FROM users WHERE lower(email) = %s AND email_confirmed = TRUE", (email,)
+            ).fetchone()
+            if user:
+                connection.execute(
+                    "UPDATE users SET reset_token_hash = %s, reset_expires = %s WHERE id = %s",
+                    (hash_token(token), expires, user["id"]),
+                )
+        if user:
+            send_password_reset_email(email, url_for("password_reset", token=token, _external=True))
+    # Misma respuesta exista o no la cuenta, para no revelar qué emails están registrados.
+    return render_template("user_forgot.html", sent=True)
+
+
+def find_user_by_reset_token(connection, token):
+    user = connection.execute(
+        "SELECT id, reset_expires FROM users WHERE reset_token_hash = %s", (hash_token(token),)
+    ).fetchone()
+    if user and user["reset_expires"] and parse_timestamp(user["reset_expires"]) > datetime.now(timezone.utc):
+        return user
+    return None
+
+
+@app.route("/usuarios/restablecer/<token>", methods=["GET", "POST"])
+@limiter.limit("10 per hour", methods=["POST"])
+def password_reset(token):
+    error = None
+    with get_db() as connection:
+        user = find_user_by_reset_token(connection, token)
+        if not user:
+            return render_template(
+                "user_reset.html",
+                invalid=True,
+            ), 400
+        if request.method == "POST":
+            password = request.form.get("password", "")
+            if not 8 <= len(password) <= 128 or password != request.form.get("password_confirmation", ""):
+                error = "Usa una contraseña de al menos 8 caracteres y repítela igual."
+            else:
+                connection.execute(
+                    "UPDATE users SET password_hash = %s, reset_token_hash = NULL, reset_expires = NULL WHERE id = %s",
+                    (generate_password_hash(password), user["id"]),
+                )
+                return render_template("user_login.html", notice="Contraseña actualizada. Ya puedes ingresar.")
+    return render_template("user_reset.html", error=error), (400 if error else 200)
 
 
 @app.post("/usuarios/logout")
@@ -555,10 +680,10 @@ def user_logout():
 def user_dashboard():
     with get_db() as connection:
         user = connection.execute(
-            "SELECT * FROM users WHERE id = ?", (session["user_id"],)
+            "SELECT * FROM users WHERE id = %s", (session["user_id"],)
         ).fetchone()
         records = connection.execute(
-            "SELECT * FROM service_records WHERE user_id = ? ORDER BY created_at DESC, id DESC",
+            "SELECT * FROM service_records WHERE user_id = %s ORDER BY created_at DESC, id DESC",
             (session["user_id"],),
         ).fetchall()
     return render_template("user_dashboard.html", user=user, records=records)
@@ -569,7 +694,7 @@ def user_dashboard():
 def repeat_service(record_id):
     with get_db() as connection:
         record = connection.execute(
-            "SELECT job FROM service_records WHERE id = ? AND user_id = ?",
+            "SELECT job FROM service_records WHERE id = %s AND user_id = %s",
             (record_id, session["user_id"]),
         ).fetchone()
     if not record:
@@ -610,10 +735,10 @@ def confirm_membership():
     payment_reference = secrets.token_urlsafe(24)
     with get_db() as connection:
         user = connection.execute(
-            "SELECT username, email FROM users WHERE id = ?", (session["user_id"],)
+            "SELECT username, email FROM users WHERE id = %s", (session["user_id"],)
         ).fetchone()
         connection.execute(
-            "INSERT INTO membership_payments (payment_reference, user_id, plan, amount) VALUES (?, ?, ?, ?)",
+            "INSERT INTO membership_payments (payment_reference, user_id, plan, amount) VALUES (%s, %s, %s, %s)",
             (payment_reference, session["user_id"], plan, plan_data["price"]),
         )
     try:
@@ -649,20 +774,24 @@ def confirm_membership():
         return render_template("membership_checkout.html", plan=plan_data, plan_key=plan, error="No se pudo iniciar el pago."), 503
     with get_db() as connection:
         connection.execute(
-            "UPDATE membership_payments SET preference_id = ? WHERE payment_reference = ?",
+            "UPDATE membership_payments SET preference_id = %s WHERE payment_reference = %s",
             (preference.get("id"), payment_reference),
         )
     return redirect(checkout_url, code=303)
 
 
 @app.post("/pagos/mercado-pago/webhook")
+@csrf.exempt  # Lo llama Mercado Pago; se autentica con la firma x-signature.
 def mercado_pago_webhook():
-    notification = request.get_json(silent=True) or {}
-    payment_id = (
-        notification.get("data", {}).get("id")
-        or request.args.get("data.id")
-        or request.args.get("id")
-    )
+    notification = request.get_json(silent=True)
+    if not isinstance(notification, dict):
+        notification = {}
+    data = notification.get("data")
+    body_id = data.get("id") if isinstance(data, dict) else None
+    payment_id = body_id or request.args.get("data.id") or request.args.get("id")
+    signed_id = request.args.get("data.id") or (str(body_id) if body_id else "")
+    if not verify_mercado_pago_signature(signed_id):
+        return "", 401
     notification_type = notification.get("type") or request.args.get("type") or request.args.get("topic")
     if payment_id and notification_type in {"payment", None}:
         try:
@@ -680,7 +809,7 @@ def membership_payment_result():
     approved = False
     if payment_id:
         try:
-            approved = apply_mercado_pago_payment(payment_id)
+            approved = apply_mercado_pago_payment(payment_id, expected_user_id=session["user_id"])
         except RuntimeError:
             pass
     return render_template("membership_pending.html", approved=approved)
@@ -688,12 +817,13 @@ def membership_payment_result():
 
 @app.get("/gestion-privada")
 def admin_login():
-    if session.get("admin_authenticated"):
+    if admin_session_active():
         return redirect(url_for("admin_dashboard"))
     return render_template("admin_login.html")
 
 
 @app.post("/gestion-privada/login")
+@limiter.limit("5 per minute;30 per hour")
 def admin_login_submit():
     configured_username = os.environ.get("ADMIN_USERNAME")
     configured_password = os.environ.get("ADMIN_PASSWORD")
@@ -703,14 +833,15 @@ def admin_login_submit():
     valid_credentials = (
         configured_username
         and configured_password
-        and hmac.compare_digest(username, configured_username)
-        and hmac.compare_digest(password, configured_password)
+        and hmac.compare_digest(username.encode("utf-8"), configured_username.encode("utf-8"))
+        and hmac.compare_digest(password.encode("utf-8"), configured_password.encode("utf-8"))
     )
     if not valid_credentials:
         return render_template("admin_login.html", error="Credenciales invalidas"), 401
 
     session.clear()
     session["admin_authenticated"] = True
+    session["admin_at"] = time.time()
     return redirect(url_for("admin_dashboard"))
 
 
@@ -745,16 +876,16 @@ def admin_dashboard():
 
         with get_db() as connection:
             connection.execute(
-                "INSERT INTO users (username) VALUES (?) ON CONFLICT (username) DO NOTHING",
+                "INSERT INTO users (username) VALUES (%s) ON CONFLICT (username) DO NOTHING",
                 (username,),
             )
             user = connection.execute(
-                "SELECT id FROM users WHERE username = ?", (username,)
+                "SELECT id FROM users WHERE username = %s", (username,)
             ).fetchone()
             connection.execute(
                 """
                 INSERT INTO service_records (user_id, job, payment, service_history)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
                 """,
                 (user["id"], job, payment, service_history),
             )
