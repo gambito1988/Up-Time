@@ -39,6 +39,16 @@ MEMBERSHIP_PLANS = {
     "premium": {"name": "Premium", "price": 15000, "description": "Atención prioritaria y dos visitas mensuales."},
 }
 
+IS_PRODUCTION = bool(os.environ.get("RENDER")) or os.environ.get("APP_ENV") == "production"
+if IS_PRODUCTION:
+    # En producción no se admiten valores por defecto: una clave aleatoria invalida las
+    # sesiones en cada reinicio y SQLite sobre el disco efímero de Render pierde los datos.
+    _missing = [name for name in ("SECRET_KEY", "DATABASE_URL") if not os.environ.get(name)]
+    if _missing:
+        raise RuntimeError(f"Faltan variables de entorno obligatorias: {', '.join(_missing)}")
+    if not USING_POSTGRES:
+        raise RuntimeError("DATABASE_URL debe ser una cadena PostgreSQL (postgresql://...).")
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32))
 app.config["PREFERRED_URL_SCHEME"] = "https"
@@ -218,6 +228,20 @@ def init_postgres_db():
             "CREATE INDEX IF NOT EXISTS membership_payments_user_id_idx "
             "ON membership_payments(user_id)"
         )
+        # Supabase expone el esquema public por su API REST con la clave anon (pública).
+        # Con RLS activo y sin políticas, esa API no puede leer ni escribir estas tablas;
+        # la aplicación no se ve afectada porque se conecta con el rol propietario.
+        for table in ("users", "service_records", "membership_payments"):
+            connection.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+
+
+def parse_timestamp(value):
+    """Convierte el valor guardado (texto en SQLite, datetime en PostgreSQL) a datetime con zona."""
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value
 
 
 def user_required(view):
@@ -418,7 +442,7 @@ def user_register_submit():
                 """
                 INSERT INTO users (username, email, password_hash, email_confirmed,
                     confirmation_token, confirmation_expires)
-                VALUES (?, ?, ?, 0, ?, ?)
+                VALUES (?, ?, ?, FALSE, ?, ?)
                 """,
                 (username, email, generate_password_hash(password), token, expires.isoformat()),
             )
@@ -460,7 +484,7 @@ def resend_confirmation_email():
         expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         with get_db() as connection:
             user = connection.execute(
-                "SELECT id FROM users WHERE email = ? AND email_confirmed = 0", (email,)
+                "SELECT id FROM users WHERE lower(email) = ? AND email_confirmed = FALSE", (email,)
             ).fetchone()
             if user:
                 connection.execute(
@@ -481,11 +505,11 @@ def confirm_email(token):
         ).fetchone()
         if not user:
             return render_template("confirmation_result.html", error="El enlace no es valido."), 404
-        expires = datetime.fromisoformat(user["confirmation_expires"])
+        expires = parse_timestamp(user["confirmation_expires"])
         if expires < datetime.now(timezone.utc):
             return render_template("confirmation_result.html", error="El enlace ya vencio."), 400
         connection.execute(
-            "UPDATE users SET email_confirmed = 1, confirmation_token = NULL, confirmation_expires = NULL WHERE id = ?",
+            "UPDATE users SET email_confirmed = TRUE, confirmation_token = NULL, confirmation_expires = NULL WHERE id = ?",
             (user["id"],),
         )
     return render_template("confirmation_result.html", confirmed=True)
@@ -721,7 +745,8 @@ def admin_dashboard():
 
         with get_db() as connection:
             connection.execute(
-                "INSERT OR IGNORE INTO users (username) VALUES (?)", (username,)
+                "INSERT INTO users (username) VALUES (?) ON CONFLICT (username) DO NOTHING",
+                (username,),
             )
             user = connection.execute(
                 "SELECT id FROM users WHERE username = ?", (username,)
