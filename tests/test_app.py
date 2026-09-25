@@ -21,12 +21,12 @@ def test_home_serves_landing(client):
     assert b"Up Time" in response.data
 
 
-@pytest.mark.parametrize("path", ["/styles.css", "/script.js", "/index.html"])
+@pytest.mark.parametrize("path", ["/styles.css", "/index.html"])
 def test_public_assets_are_served(client, path):
     assert client.get(path).status_code == 200
 
 
-@pytest.mark.parametrize("path", ["/app.py", "/requirements.txt", "/render.yaml", "/.env", "/CLAUDE.md"])
+@pytest.mark.parametrize("path", ["/script.js", "/app.py", "/requirements.txt", "/render.yaml", "/.env", "/CLAUDE.md"])
 def test_source_files_are_not_served(client, path):
     assert client.get(path).status_code == 404
 

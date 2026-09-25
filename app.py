@@ -29,7 +29,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 BASE_DIR = Path(__file__).resolve().parent
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 WHATSAPP_NUMBER = "5491161471426"
-PUBLIC_ASSETS = {"index.html", "styles.css", "script.js"}
+PUBLIC_ASSETS = {"index.html", "styles.css"}
 MEMBERSHIP_PLANS = {
     "basic": {"name": "Basic", "price": 5000, "description": "Soporte remoto y prioridad estándar."},
     "intermedio": {"name": "Intermedio", "price": 9000, "description": "Soporte remoto y una visita mensual."},
