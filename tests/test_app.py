@@ -31,19 +31,117 @@ def test_source_files_are_not_served(client, path):
     assert client.get(path).status_code == 404
 
 
-def test_contact_redirects_to_whatsapp(client):
-    response = client.post(
-        "/contacto",
-        data={"nombre": "Ana", "email": "ana@example.com", "telefono": "1", "mensaje": "No enciende"},
-    )
+CONTACT = {"nombre": "Ana", "email": "ana@example.com", "telefono": "1", "mensaje": "No enciende"}
+
+
+@pytest.fixture
+def contact_calls(monkeypatch):
+    """Registra lo que /contacto guarda y notifica, sin base de datos ni hilos."""
+    calls = {"saved": [], "notified": []}
+    monkeypatch.setattr(app_module, "save_contact_message", lambda *args: calls["saved"].append(args))
+    monkeypatch.setattr(app_module, "notify_contact", lambda *args: calls["notified"].append(args))
+    monkeypatch.setattr(app_module, "run_in_background", lambda function, *args: function(*args))
+    return calls
+
+
+def test_contact_saves_notifies_and_redirects_to_whatsapp(client, contact_calls):
+    response = client.post("/contacto", data=CONTACT)
     assert response.status_code == 303
     assert response.headers["Location"].startswith(f"https://wa.me/{app_module.WHATSAPP_NUMBER}?text=")
     assert "Ana" in response.headers["Location"]
+    assert contact_calls["saved"] == [("Ana", "ana@example.com", "1", "No enciende")]
+    assert contact_calls["notified"] == [("Ana", "ana@example.com", "1", "No enciende")]
 
 
-def test_contact_requires_fields(client):
+def test_contact_requires_fields(client, contact_calls):
     response = client.post("/contacto", data={"nombre": "Ana"})
     assert response.status_code == 400
+    assert contact_calls["saved"] == []
+
+
+@pytest.mark.parametrize(
+    "override",
+    [{"email": "no-es-un-email"}, {"nombre": "x" * 101}, {"mensaje": "x" * 2001}, {"telefono": "1" * 41}],
+)
+def test_contact_rejects_invalid_or_oversized_fields(client, contact_calls, override):
+    response = client.post("/contacto", data={**CONTACT, **override})
+    assert response.status_code == 400
+    assert contact_calls["saved"] == []
+
+
+def test_contact_honeypot_discards_bots_silently(client, contact_calls):
+    response = client.post("/contacto", data={**CONTACT, "website": "http://spam.example"})
+    assert response.status_code == 303
+    assert "wa.me" not in response.headers["Location"]
+    assert contact_calls["saved"] == [] and contact_calls["notified"] == []
+
+
+def test_contact_still_redirects_to_whatsapp_when_the_database_fails(client, contact_calls, monkeypatch):
+    def broken(*args):
+        raise app_module.psycopg.OperationalError("sin conexion")
+
+    monkeypatch.setattr(app_module, "save_contact_message", broken)
+    response = client.post("/contacto", data=CONTACT)
+    assert response.status_code == 303
+    assert response.headers["Location"].startswith("https://wa.me/")
+
+
+def test_notify_contact_emails_the_business_only_when_configured(monkeypatch):
+    sent = []
+    monkeypatch.setattr(app_module, "send_email", lambda to, subject, body: sent.append((to, subject, body)))
+    monkeypatch.delenv("CONTACT_NOTIFY_EMAIL", raising=False)
+    monkeypatch.delenv("EMAIL_WEBHOOK_URL", raising=False)
+    app_module.notify_contact("Ana", "ana@example.com", "", "No enciende")
+    assert sent == []
+
+    monkeypatch.setenv("CONTACT_NOTIFY_EMAIL", "negocio@example.com")
+    app_module.notify_contact("Ana", "ana@example.com", "", "No enciende")
+    assert sent[0][0] == "negocio@example.com"
+    assert "Ana" in sent[0][1] and "No enciende" in sent[0][2]
+
+
+def test_notify_contact_uses_the_webhook_when_configured(monkeypatch):
+    by_smtp, by_webhook = [], []
+    monkeypatch.setattr(app_module, "send_email", lambda *args: by_smtp.append(args))
+    monkeypatch.setattr(app_module, "send_email_via_webhook", lambda *args: by_webhook.append(args))
+    monkeypatch.setenv("CONTACT_NOTIFY_EMAIL", "negocio@example.com")
+    monkeypatch.setenv("EMAIL_WEBHOOK_URL", "https://n8n.example.com/webhook/uptime-email")
+    app_module.notify_contact("Ana", "ana@example.com", "", "No enciende")
+    assert by_smtp == []
+    assert by_webhook[0][0] == "negocio@example.com"
+
+
+class _FakeResponse:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_send_email_via_webhook_posts_json_with_the_secret(monkeypatch):
+    requests = []
+    monkeypatch.setattr(app_module, "urlopen", lambda req, timeout: requests.append(req) or _FakeResponse())
+    monkeypatch.setenv("EMAIL_WEBHOOK_URL", "https://n8n.example.com/webhook/uptime-email")
+    monkeypatch.setenv("EMAIL_WEBHOOK_SECRET", "clave")
+    assert app_module.send_email_via_webhook("a@example.com", "Asunto", "Texto") is True
+    sent = requests[0]
+    assert sent.get_method() == "POST"
+    assert sent.get_header("X-uptime-secret") == "clave"
+    assert app_module.json.loads(sent.data) == {"to": "a@example.com", "subject": "Asunto", "body": "Texto"}
+
+
+def test_send_email_via_webhook_fails_softly(monkeypatch):
+    monkeypatch.setenv("EMAIL_WEBHOOK_URL", "https://n8n.example.com/webhook/uptime-email")
+    monkeypatch.delenv("EMAIL_WEBHOOK_SECRET", raising=False)
+    assert app_module.send_email_via_webhook("a@example.com", "Asunto", "Texto") is False
+
+    def fail(*args, **kwargs):
+        raise app_module.URLError("sin red")
+
+    monkeypatch.setattr(app_module, "urlopen", fail)
+    monkeypatch.setenv("EMAIL_WEBHOOK_SECRET", "clave")
+    assert app_module.send_email_via_webhook("a@example.com", "Asunto", "Texto") is False
 
 
 def test_membership_page_lists_plans(client):
