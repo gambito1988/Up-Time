@@ -563,3 +563,31 @@ def test_admin_can_deactivate_and_reactivate_a_client(user_client, app_ctx, monk
 def test_client_routes_require_admin(db, client):
     assert client.post("/gestion-privada/clientes/1/editar", data={}).status_code == 302
     assert client.post("/gestion-privada/clientes/1/estado", data={"active": "0"}).status_code == 302
+
+
+# --- Boton de arrepentimiento ----------------------------------------------------
+
+def test_withdrawal_request_is_saved_and_notified_and_visible_to_admin(db, client, sent_emails, monkeypatch):
+    monkeypatch.setattr(app_module, "run_in_background", lambda function, *args: function(*args))
+    monkeypatch.setenv("CONTACT_NOTIFY_EMAIL", "negocio@example.com")
+    response = client.post("/arrepentimiento", data={
+        "nombre": "Ana", "email": "ana@example.com", "referencia": "Plan Básico, pagado el 20/09/2026",
+    })
+    assert response.status_code == 200
+    assert b"registramos tu solicitud" in response.data.lower()
+
+    row = query("SELECT id, name, email, message FROM contact_messages")[0]
+    assert row["name"] == "[Arrepentimiento] Ana"
+    assert row["email"] == "ana@example.com"
+    assert "Plan Básico" in row["message"]
+
+    # Un email al negocio (CONTACT_NOTIFY_EMAIL) y un comprobante al cliente con el numero de referencia.
+    recipients = {sent[0] for sent in sent_emails}
+    assert recipients == {"negocio@example.com", "ana@example.com"}
+    customer_email = next(sent for sent in sent_emails if sent[0] == "ana@example.com")
+    assert str(row["id"]) in customer_email[1]
+
+    admin = app_module.app.test_client()
+    admin_login(admin, monkeypatch)
+    page = admin.get("/gestion-privada/panel").data.decode()
+    assert "[Arrepentimiento] Ana" in page

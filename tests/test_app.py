@@ -31,6 +31,24 @@ def test_source_files_are_not_served(client, path):
     assert client.get(path).status_code == 404
 
 
+@pytest.mark.parametrize("path", ["/terminos", "/privacidad", "/arrepentimiento"])
+def test_legal_pages_are_public(client, path):
+    assert client.get(path).status_code == 200
+
+
+def test_withdrawal_request_requires_fields(client):
+    response = client.post("/arrepentimiento", data={})
+    assert response.status_code == 400
+
+
+def test_withdrawal_request_rejects_invalid_email(client):
+    response = client.post(
+        "/arrepentimiento",
+        data={"nombre": "Ana", "email": "no-es-un-email", "referencia": "Plan Básico"},
+    )
+    assert response.status_code == 400
+
+
 CONTACT = {"nombre": "Ana", "email": "ana@example.com", "telefono": "1", "mensaje": "No enciende"}
 
 

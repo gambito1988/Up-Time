@@ -29,6 +29,13 @@ from werkzeug.security import check_password_hash, generate_password_hash
 BASE_DIR = Path(__file__).resolve().parent
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 WHATSAPP_NUMBER = "5491161471426"
+# Datos fiscales para los Términos y la Política de Privacidad. Completar antes de publicar:
+# la Res. 424/2020 y la Ley 24.240 exigen identificar al proveedor (razón social, CUIT, domicilio).
+BUSINESS_LEGAL_NAME = os.environ.get("BUSINESS_LEGAL_NAME", "[Completar: razón social]")
+BUSINESS_CUIT = os.environ.get("BUSINESS_CUIT", "[Completar: CUIT]")
+BUSINESS_ADDRESS = os.environ.get("BUSINESS_ADDRESS", "[Completar: domicilio legal]")
+BUSINESS_EMAIL = os.environ.get("BUSINESS_EMAIL", "info@uptime.com.ar")
+WITHDRAWAL_DAYS = 10  # Art. 34, Ley 24.240: 10 días corridos desde la contratación.
 PUBLIC_ASSETS = {"index.html", "styles.css"}
 CONTACT_LIMITS = {"nombre": 100, "email": 254, "telefono": 40, "mensaje": 2000}
 CONTACT_STATUSES = {"new": "Nuevo", "replied": "Respondido", "closed": "Cerrado"}
@@ -328,6 +335,73 @@ def assets(filename):
     return send_from_directory(BASE_DIR, filename)
 
 
+@app.get("/terminos")
+def terms():
+    return render_template(
+        "terminos.html",
+        plans=MEMBERSHIP_PLANS,
+        membership_days=MEMBERSHIP_DAYS,
+        withdrawal_days=WITHDRAWAL_DAYS,
+        legal_name=BUSINESS_LEGAL_NAME,
+        cuit=BUSINESS_CUIT,
+        address=BUSINESS_ADDRESS,
+        contact_email=BUSINESS_EMAIL,
+    )
+
+
+@app.get("/privacidad")
+def privacy():
+    return render_template(
+        "privacidad.html",
+        legal_name=BUSINESS_LEGAL_NAME,
+        cuit=BUSINESS_CUIT,
+        address=BUSINESS_ADDRESS,
+        contact_email=BUSINESS_EMAIL,
+    )
+
+
+@app.get("/arrepentimiento")
+def right_of_withdrawal():
+    return render_template("arrepentimiento.html", withdrawal_days=WITHDRAWAL_DAYS, contact_email=BUSINESS_EMAIL)
+
+
+@app.post("/arrepentimiento")
+@limiter.limit("10 per hour")
+def right_of_withdrawal_submit():
+    nombre = " ".join(request.form.get("nombre", "").split())[:100]
+    raw_email = request.form.get("email", "").strip()
+    referencia = " ".join(request.form.get("referencia", "").split())[:200]
+    motivo = request.form.get("motivo", "").strip()[:2000]
+
+    def form_error(message):
+        return render_template(
+            "arrepentimiento.html", withdrawal_days=WITHDRAWAL_DAYS, contact_email=BUSINESS_EMAIL, error=message
+        ), 400
+
+    if not nombre or not raw_email or not referencia:
+        return form_error("Completa tu nombre, email y a qué compra corresponde (plan o fecha de pago).")
+    try:
+        email = validate_email(raw_email, check_deliverability=False).normalized
+    except EmailNotValidError:
+        return form_error("El email no es válido.")
+
+    mensaje = f"Compra: {referencia}\n\nMotivo: {motivo or 'No indicado.'}"
+    try:
+        with get_db() as connection:
+            row = connection.execute(
+                "INSERT INTO contact_messages (name, email, phone, message) VALUES (%s, %s, NULL, %s) RETURNING id",
+                (f"[Arrepentimiento] {nombre}", email, mensaje),
+            ).fetchone()
+    except DATABASE_ERRORS:
+        app.logger.exception("No se pudo guardar la solicitud de arrepentimiento")
+        return form_error(
+            f"No pudimos registrar tu solicitud. Escribinos directamente a {BUSINESS_EMAIL} citando este mismo motivo."
+        )
+    run_in_background(notify_contact, f"[Arrepentimiento] {nombre}", email, None, mensaje)
+    run_in_background(notify_withdrawal_customer, email, row["id"], referencia)
+    return render_template("arrepentimiento_confirmacion.html", request_id=row["id"], email=email)
+
+
 def save_contact_message(name, email, phone, message):
     with get_db() as connection:
         connection.execute(
@@ -354,6 +428,19 @@ def notify_contact(name, email, phone, message):
 def run_in_background(function, *args):
     """El envío SMTP puede tardar hasta su timeout; no debe demorar la respuesta al visitante."""
     threading.Thread(target=function, args=args, daemon=True).start()
+
+
+def notify_withdrawal_customer(email, request_id, referencia):
+    """Le manda al cliente un comprobante por email de su solicitud de arrepentimiento."""
+    sender = send_email_via_webhook if os.environ.get("EMAIL_WEBHOOK_URL") else send_email
+    sender(
+        email,
+        f"Recibimos tu solicitud de arrepentimiento #{request_id} - Up Time",
+        f"Registramos tu solicitud de arrepentimiento sobre: {referencia}\n\n"
+        f"Número de referencia: #{request_id}\n\n"
+        "Te contactaremos para coordinar el reembolso, por el mismo medio de pago que usaste.\n\n"
+        "Equipo Up Time",
+    )
 
 
 @app.post("/contacto")

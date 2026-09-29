@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Política de privacidad | Up Time{% endblock %}
+{% block content %}
+<div class="intro"><p class="muted">TUS DATOS</p><h1>Política de privacidad</h1><p class="muted">Última actualización: septiembre de 2026.</p></div>
+<section class="panel">
+    <h2>1. Responsable del tratamiento</h2>
+    <p><strong>{{ legal_name }}</strong>, CUIT {{ cuit }}, con domicilio en {{ address }}, Argentina, es responsable de los datos personales que se describen a continuación. Contacto: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>.</p>
+
+    <h2>2. Qué datos recopilamos</h2>
+    <ul>
+        <li><strong>Al crear una cuenta:</strong> nombre de usuario, email y contraseña (guardada siempre encriptada, nunca en texto plano).</li>
+        <li><strong>Al escribirnos por el formulario de contacto:</strong> nombre, email, teléfono (opcional) y el mensaje.</li>
+        <li><strong>Al contratar una membresía:</strong> el plan elegido y el estado del pago. Los datos de tu tarjeta los procesa Mercado Pago directamente: no los recibimos ni los guardamos.</li>
+        <li><strong>Historial de servicio:</strong> si nos contratás un trabajo técnico, guardamos un registro del trabajo realizado y el pago asociado, visible desde tu cuenta.</li>
+    </ul>
+
+    <h2>3. Para qué usamos tus datos</h2>
+    <p>Usamos tus datos para crear y administrar tu cuenta, prestarte el servicio contratado, procesar pagos, enviarte confirmaciones y avisos relacionados con tu membresía (por ejemplo, cuando está por vencer), y responder tus consultas.</p>
+
+    <h2>4. Con quién compartimos datos</h2>
+    <p>No vendemos tus datos. Los compartimos únicamente con los proveedores que usamos para operar el sitio, todos actuando como encargados del tratamiento:</p>
+    <ul>
+        <li><strong>Mercado Pago</strong>, para procesar los pagos.</li>
+        <li><strong>Render</strong>, donde se aloja la aplicación.</li>
+        <li><strong>Supabase</strong>, donde se aloja la base de datos.</li>
+        <li>Nuestro proveedor de envío de emails, para las notificaciones y confirmaciones por correo.</li>
+    </ul>
+
+    <h2>5. Cuánto tiempo conservamos tus datos</h2>
+    <p>Conservamos tus datos mientras tu cuenta esté activa, y después el tiempo que exijan nuestras obligaciones legales, contables o impositivas.</p>
+
+    <h2>6. Seguridad</h2>
+    <p>Las contraseñas se guardan encriptadas (nunca en texto plano), el sitio funciona bajo HTTPS y la base de datos tiene seguridad a nivel de fila (Row Level Security) habilitada.</p>
+
+    <h2>7. Tus derechos</h2>
+    <p>Conforme a la Ley 25.326 de Protección de Datos Personales, tenés derecho a acceder, rectificar, actualizar o suprimir tus datos personales (derechos ARCO). Para ejercerlos, escribinos a <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>. La Agencia de Acceso a la Información Pública, en su carácter de Órgano de Control de la Ley 25.326, tiene la atribución de atender las denuncias y reclamos que se interpongan con relación al incumplimiento de las normas sobre protección de datos personales.</p>
+
+    <h2>8. Cookies</h2>
+    <p>El sitio usa únicamente una cookie técnica necesaria para mantener tu sesión iniciada. No usamos cookies de seguimiento ni de terceros con fines publicitarios o analíticos.</p>
+
+    <h2>9. Cambios en esta política</h2>
+    <p>Podemos actualizar esta política; la fecha de la última actualización figura al inicio de esta página.</p>
+
+    <h2>10. Contacto</h2>
+    <p>Ante cualquier consulta sobre el tratamiento de tus datos, escribinos a <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>.</p>
+</section>
+{% endblock %}

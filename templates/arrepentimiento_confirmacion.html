@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Solicitud recibida | Up Time{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<section class="panel">
+    <p class="muted">SOLICITUD RECIBIDA</p>
+    <h1>Registramos tu solicitud</h1>
+    <p class="alert success">Número de referencia: <strong>#{{ request_id }}</strong></p>
+    <p>Te vamos a contactar a <strong>{{ email }}</strong> para coordinar el reembolso, por el mismo medio de pago que usaste. Guardá este número de referencia por si necesitás consultar el estado de tu solicitud.</p>
+    <a class="button" href="{{ url_for('home') }}">Volver al inicio</a>
+</section>
+{% endblock %}
