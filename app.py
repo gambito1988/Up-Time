@@ -17,7 +17,9 @@ from urllib.request import Request, urlopen
 
 import psycopg
 from email_validator import EmailNotValidError, validate_email
-from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from flask import (
+    Flask, Response, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for,
+)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFError, CSRFProtect
@@ -36,7 +38,7 @@ BUSINESS_CUIT = os.environ.get("BUSINESS_CUIT", "[Completar: CUIT]")
 BUSINESS_ADDRESS = os.environ.get("BUSINESS_ADDRESS", "[Completar: domicilio legal]")
 BUSINESS_EMAIL = os.environ.get("BUSINESS_EMAIL", "info@uptime.com.ar")
 WITHDRAWAL_DAYS = 10  # Art. 34, Ley 24.240: 10 días corridos desde la contratación.
-PUBLIC_ASSETS = {"index.html", "styles.css"}
+PUBLIC_ASSETS = {"index.html", "styles.css", "favicon.svg"}
 CONTACT_LIMITS = {"nombre": 100, "email": 254, "telefono": 40, "mensaje": 2000}
 CONTACT_STATUSES = {"new": "Nuevo", "replied": "Respondido", "closed": "Cerrado"}
 SERVICE_STATUSES = {"pendiente": "Pendiente", "pagado": "Pagado"}
@@ -326,6 +328,32 @@ def home():
 @app.get("/healthz")
 def healthz():
     return jsonify(status="ok")
+
+
+@app.get("/favicon.ico")
+def favicon_ico():
+    # Los navegadores piden /favicon.ico por default aunque el <link rel="icon"> apunte al SVG.
+    return redirect(url_for("assets", filename="favicon.svg"), code=301)
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    lines = [
+        "User-agent: *", "Allow: /", "Disallow: /gestion-privada",
+        f"Sitemap: {url_for('sitemap_xml', _external=True)}",
+    ]
+    return Response("\n".join(lines) + "\n", mimetype="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    # URLs absolutas: se arman solas con el dominio real de la petición, no queda una URL fija.
+    routes = ["home", "memberships", "terms", "privacy", "right_of_withdrawal", "user_login", "user_register"]
+    urls = [url_for(route, _external=True) for route in routes]
+    body = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    body += [f"  <url><loc>{url}</loc></url>" for url in urls]
+    body.append("</urlset>")
+    return Response("\n".join(body) + "\n", mimetype="application/xml")
 
 
 @app.get("/<path:filename>")

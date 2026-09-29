@@ -21,9 +21,48 @@ def test_home_serves_landing(client):
     assert b"Up Time" in response.data
 
 
-@pytest.mark.parametrize("path", ["/styles.css", "/index.html"])
+@pytest.mark.parametrize("path", ["/styles.css", "/index.html", "/favicon.svg"])
 def test_public_assets_are_served(client, path):
     assert client.get(path).status_code == 200
+
+
+def test_favicon_ico_redirects_to_svg(client):
+    response = client.get("/favicon.ico")
+    assert response.status_code == 301
+    assert response.headers["Location"].endswith("/favicon.svg")
+
+
+def test_robots_txt_disallows_admin_and_points_to_sitemap(client):
+    response = client.get("/robots.txt")
+    assert response.status_code == 200
+    body = response.data.decode()
+    assert "Disallow: /gestion-privada" in body
+    assert "Sitemap:" in body and "/sitemap.xml" in body
+
+
+def test_sitemap_lists_public_pages(client):
+    response = client.get("/sitemap.xml")
+    assert response.status_code == 200
+    body = response.data.decode()
+    for path in ("/terminos", "/privacidad", "/arrepentimiento", "/membresias"):
+        assert f"<loc>https://localhost{path}</loc>" in body
+
+
+def test_home_has_meta_description_and_og_tags(client):
+    body = client.get("/").data.decode()
+    assert '<meta name="description"' in body
+    assert 'property="og:title"' in body
+
+
+@pytest.mark.parametrize("path", ["/usuarios/login", "/usuarios/registro"])
+def test_account_pages_are_noindex(client, path):
+    body = client.get(path).data.decode()
+    assert '<meta name="robots" content="noindex, nofollow">' in body
+
+
+def test_memberships_page_is_indexable(client):
+    body = client.get("/membresias").data.decode()
+    assert '<meta name="robots" content="index, follow">' in body
 
 
 @pytest.mark.parametrize("path", ["/script.js", "/app.py", "/requirements.txt", "/render.yaml", "/.env", "/CLAUDE.md"])
