@@ -4,6 +4,7 @@
 {% block content %}
 <div class="intro"><p class="muted">SOPORTE CONTINUO</p><h1>Una membresía para cada ritmo de trabajo.</h1><p class="muted">Paga de forma segura con Mercado Pago o tarjeta.</p></div>
 <div class="grid">
-{% for key, plan in plans.items() %}<article class="card"><p class="muted">PLAN {{ loop.index }}</p><h2>{{ plan.name }}</h2><div class="price">${{ '%.0f'|format(plan.price) }} <small>/ mes</small></div><p>{{ plan.description }}</p>{% if plan.monthly_visits %}<p class="muted">Incluye {{ plan.monthly_visits }} visita{{ 's' if plan.monthly_visits != 1 else '' }} a domicilio por mes.</p>{% endif %}<form method="post" action="{{ url_for('select_membership') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="plan" value="{{ key }}"><button type="submit">Elegir {{ plan.name }}</button></form></article>{% endfor %}
+{% for key, plan in plans.items() %}<article class="card"><p class="muted">PLAN {{ loop.index }}</p><h2>{{ plan.name }}</h2><div class="price">${{ '%.0f'|format(plan.price) }} <small>/ mes</small></div><ul>{% for feature in plan.features %}<li>{{ feature }}</li>{% endfor %}</ul><form method="post" action="{{ url_for('select_membership') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="plan" value="{{ key }}"><button type="submit">Elegir {{ plan.name }}</button></form></article>{% endfor %}
 </div>
+<p class="muted">Las visitas y soporte quedan en programación a cargo del usuario, no son acumulables, no transferibles ni delegables, al caducar el mes se pierde automáticamente.</p>
 {% endblock %}

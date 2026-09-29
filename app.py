@@ -48,9 +48,43 @@ PAYMENT_STATUS_LABELS = {
 }
 MEMBERSHIP_STATE_LABELS = {"active": "Activa", "expired": "Vencida", "inactive": "Sin membresía"}
 MEMBERSHIP_PLANS = {
-    "basic": {"name": "Basic", "price": 5000, "description": "Soporte remoto y prioridad estándar.", "monthly_visits": 0},
-    "intermedio": {"name": "Intermedio", "price": 9000, "description": "Soporte remoto y una visita mensual.", "monthly_visits": 1},
-    "premium": {"name": "Premium", "price": 15000, "description": "Atención prioritaria y dos visitas mensuales.", "monthly_visits": 2},
+    "basic": {
+        "name": "Basic",
+        "price": 35000,
+        "description": "Soporte remoto y prioridad estándar.",
+        "features": [
+            "Presupuestos sin cargo.",
+            "1 soporte remoto básico sin cargo.",
+            "Soporte remoto y prioridad estándar.",
+        ],
+        "monthly_visits": 0,
+    },
+    "intermedio": {
+        "name": "Intermedio",
+        "price": 49000,
+        "description": "Soporte remoto y prioridad intermedia. Incluye 1 visita a domicilio por mes.",
+        "features": [
+            "Presupuestos sin cargo.",
+            "2 soportes remotos básicos sin cargo.",
+            "1 limpieza de virus.",
+            "Soporte remoto y prioridad intermedia.",
+            "Incluye 1 visita a domicilio por mes.",
+        ],
+        "monthly_visits": 1,
+    },
+    "premium": {
+        "name": "Premium",
+        "price": 65000,
+        "description": "Atención prioritaria y dos visitas mensuales.",
+        "features": [
+            "Presupuestos sin cargo.",
+            "4 soportes remotos básicos sin cargo.",
+            "2 limpiezas de virus.",
+            "1 actualización de drivers y corrección de errores de Windows.",
+            "Atención prioritaria y dos visitas mensuales.",
+        ],
+        "monthly_visits": 2,
+    },
 }
 # Orden de prioridad de atención por plan: a mayor numero, se atiende antes. 0 = sin membresia activa.
 MEMBERSHIP_PRIORITY_RANK = {"basic": 1, "intermedio": 2, "premium": 3}
