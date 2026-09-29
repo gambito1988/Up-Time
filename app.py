@@ -32,6 +32,8 @@ WHATSAPP_NUMBER = "5491161471426"
 PUBLIC_ASSETS = {"index.html", "styles.css"}
 CONTACT_LIMITS = {"nombre": 100, "email": 254, "telefono": 40, "mensaje": 2000}
 CONTACT_STATUSES = {"new": "Nuevo", "replied": "Respondido", "closed": "Cerrado"}
+SERVICE_STATUSES = {"pendiente": "Pendiente", "pagado": "Pagado"}
+MEMBERSHIP_STATE_LABELS = {"active": "Activa", "expired": "Vencida", "inactive": "Sin membresía"}
 MEMBERSHIP_PLANS = {
     "basic": {"name": "Basic", "price": 5000, "description": "Soporte remoto y prioridad estándar."},
     "intermedio": {"name": "Intermedio", "price": 9000, "description": "Soporte remoto y una visita mensual."},
@@ -106,7 +108,8 @@ def init_db():
                 membership_started_at TIMESTAMPTZ,
                 membership_expires_at TIMESTAMPTZ,
                 reset_token_hash TEXT,
-                reset_expires TIMESTAMPTZ
+                reset_expires TIMESTAMPTZ,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE
             )
             """
         )
@@ -118,6 +121,7 @@ def init_db():
                 job TEXT NOT NULL,
                 payment DOUBLE PRECISION NOT NULL DEFAULT 0,
                 service_history TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pendiente',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -163,9 +167,13 @@ def init_db():
             "membership_expires_at": "TIMESTAMPTZ",
             "reset_token_hash": "TEXT",
             "reset_expires": "TIMESTAMPTZ",
+            "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
         }
         for column, definition in migrations.items():
             connection.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {column} {definition}")
+        connection.execute(
+            "ALTER TABLE service_records ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pendiente'"
+        )
         # Membresías activadas antes de que existiera el vencimiento: cuentan desde su inicio.
         connection.execute(
             "UPDATE users SET membership_expires_at = membership_started_at + make_interval(days => %s) "
@@ -619,7 +627,7 @@ def user_register_submit():
     try:
         with get_db() as connection:
             existing_email = connection.execute(
-                "SELECT id, username, password_hash FROM users WHERE lower(email) = %s", (email,)
+                "SELECT id, username, password_hash, is_active FROM users WHERE lower(email) = %s", (email,)
             ).fetchone()
             if existing_email:
                 # Cuenta cargada por el administrador que nadie activó todavía: solo se reclama con
@@ -627,6 +635,7 @@ def user_register_submit():
                 # email, así nadie puede quedarse con la cuenta de otro escribiendo su email.
                 claimable = (
                     not existing_email["password_hash"]
+                    and existing_email["is_active"]
                     and existing_email["username"].lower() == username.lower()
                 )
                 if not claimable:
@@ -744,10 +753,13 @@ def user_login_submit():
     password = request.form.get("password", "")
     with get_db() as connection:
         user = connection.execute(
-            "SELECT id, password_hash, email_confirmed FROM users WHERE lower(email) = %s",
+            "SELECT id, password_hash, email_confirmed, is_active FROM users WHERE lower(email) = %s",
             (email,),
         ).fetchone()
     if not user or not user["password_hash"] or not check_password_hash(user["password_hash"], password):
+        return render_template("user_login.html", error="Email o contraseña incorrectos."), 401
+    if not user["is_active"]:
+        # Cuenta desactivada por el admin: mismo mensaje que credenciales invalidas, para no revelar el motivo.
         return render_template("user_login.html", error="Email o contraseña incorrectos."), 401
     if not user["email_confirmed"]:
         return render_template("user_login.html", error="Confirma tu email antes de ingresar."), 403
@@ -1014,8 +1026,11 @@ def admin_logout():
 def load_admin_data():
     with get_db() as connection:
         users = connection.execute(
-            "SELECT id, username, created_at FROM users ORDER BY username"
+            "SELECT id, username, email, membership_status, membership_expires_at, is_active, created_at "
+            "FROM users ORDER BY is_active DESC, username"
         ).fetchall()
+        for user in users:
+            user["membership_label"] = MEMBERSHIP_STATE_LABELS[membership_state(user)]
         records = connection.execute(
             """
             SELECT service_records.*, users.username
@@ -1028,7 +1043,13 @@ def load_admin_data():
             "SELECT id, name, email, phone, message, status, created_at FROM contact_messages "
             "ORDER BY created_at DESC, id DESC LIMIT 100"
         ).fetchall()
-    return {"users": users, "records": records, "messages": messages, "statuses": CONTACT_STATUSES}
+    return {
+        "users": users,
+        "records": records,
+        "messages": messages,
+        "statuses": CONTACT_STATUSES,
+        "service_statuses": SERVICE_STATUSES,
+    }
 
 
 @app.post("/gestion-privada/mensajes/<int:message_id>/estado")
@@ -1040,6 +1061,99 @@ def update_contact_status(message_id):
     with get_db() as connection:
         connection.execute("UPDATE contact_messages SET status = %s WHERE id = %s", (status, message_id))
     return redirect(url_for("admin_dashboard") + "#mensajes")
+
+
+@app.post("/gestion-privada/clientes/<int:user_id>/editar")
+@admin_required
+def update_client(user_id):
+    username = request.form.get("username", "").strip()
+    raw_email = request.form.get("email", "").strip()
+
+    def form_error(message):
+        return render_template("admin_dashboard.html", **load_admin_data(), error=message), 400
+
+    if not username:
+        return form_error("El nombre de usuario no puede quedar vacío.")
+    email = None
+    if raw_email:
+        try:
+            email = validate_email(raw_email, check_deliverability=False).normalized.lower()
+        except EmailNotValidError:
+            return form_error("El email del cliente no es válido.")
+
+    try:
+        with get_db() as connection:
+            current = connection.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
+            if not current:
+                abort(404)
+            if not raw_email:
+                # Un campo vacío no borra el email existente (evitaría que el cliente pueda entrar);
+                # para quitarlo hay que reemplazarlo por otro, no simplemente dejarlo en blanco.
+                email = current["email"]
+            username_taken = connection.execute(
+                "SELECT id FROM users WHERE LOWER(username) = LOWER(%s) AND id != %s", (username, user_id)
+            ).fetchone()
+            if username_taken:
+                return form_error("Ese nombre de usuario ya está en uso.")
+            if email:
+                email_taken = connection.execute(
+                    "SELECT id FROM users WHERE LOWER(email) = %s AND id != %s", (email, user_id)
+                ).fetchone()
+                if email_taken:
+                    return form_error("Ese email ya pertenece a otro cliente.")
+            connection.execute(
+                "UPDATE users SET username = %s, email = %s WHERE id = %s", (username, email, user_id)
+            )
+    except INTEGRITY_ERRORS:
+        return form_error("No se pudo guardar: el nombre o el email ya existen.")
+    return redirect(url_for("admin_dashboard") + "#clientes")
+
+
+@app.post("/gestion-privada/clientes/<int:user_id>/estado")
+@admin_required
+def toggle_client_active(user_id):
+    # Los clientes no se borran (perderían su historial de servicios y pagos): se desactivan.
+    # Un cliente desactivado no puede iniciar sesión ni reclamar la cuenta hasta reactivarse.
+    active = request.form.get("active") == "1"
+    with get_db() as connection:
+        connection.execute("UPDATE users SET is_active = %s WHERE id = %s", (active, user_id))
+    return redirect(url_for("admin_dashboard") + "#clientes")
+
+
+@app.post("/gestion-privada/servicios/<int:record_id>/editar")
+@admin_required
+def update_service_record(record_id):
+    job = request.form.get("job", "").strip()
+    service_history = request.form.get("service_history", "").strip()
+    payment_text = request.form.get("payment", "0").strip().replace(",", ".")
+    status = request.form.get("status", "")
+    try:
+        payment = float(payment_text)
+    except ValueError:
+        payment = -1
+
+    if not job or not service_history or payment < 0 or status not in SERVICE_STATUSES:
+        return render_template(
+            "admin_dashboard.html",
+            **load_admin_data(),
+            error="Completa todos los campos del servicio y usa un pago válido.",
+        ), 400
+
+    with get_db() as connection:
+        connection.execute(
+            "UPDATE service_records SET job = %s, payment = %s, service_history = %s, status = %s "
+            "WHERE id = %s",
+            (job, payment, service_history, status, record_id),
+        )
+    return redirect(url_for("admin_dashboard") + "#servicios")
+
+
+@app.post("/gestion-privada/servicios/<int:record_id>/borrar")
+@admin_required
+def delete_service_record(record_id):
+    with get_db() as connection:
+        connection.execute("DELETE FROM service_records WHERE id = %s", (record_id,))
+    return redirect(url_for("admin_dashboard") + "#servicios")
 
 
 @app.route("/gestion-privada/panel", methods=["GET", "POST"])
