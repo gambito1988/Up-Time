@@ -1144,7 +1144,9 @@ def mercado_pago_webhook():
     data = notification.get("data")
     body_id = data.get("id") if isinstance(data, dict) else None
     payment_id = body_id or request.args.get("data.id") or request.args.get("id")
-    signed_id = request.args.get("data.id") or (str(body_id) if body_id else "")
+    # Los eventos "Pagos (legacy)" mandan el id como ?id=XXXX (no data.id), sin este
+    # fallback el manifest quedaba armado sin "id:...;" y la firma nunca coincidia.
+    signed_id = str(payment_id) if payment_id else ""
     if not verify_mercado_pago_signature(signed_id):
         return "", 401
     notification_type = notification.get("type") or request.args.get("type") or request.args.get("topic")
