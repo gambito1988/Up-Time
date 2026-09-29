@@ -707,7 +707,9 @@ def apply_mercado_pago_payment(payment_id, expected_user_id=None):
 
 def verify_mercado_pago_signature(data_id):
     """Valida la cabecera x-signature de los webhooks (HMAC-SHA256 con la clave secreta de MP)."""
-    secret = os.environ.get("MERCADOPAGO_WEBHOOK_SECRET")
+    # .strip(): un espacio o salto de linea de mas al pegar la clave en Render rompe el HMAC
+    # sin que se note a simple vista (la clave se ve "igual" pero no calza).
+    secret = os.environ.get("MERCADOPAGO_WEBHOOK_SECRET", "").strip() or None
     if not secret:
         if IS_PRODUCTION:
             app.logger.error("MERCADOPAGO_WEBHOOK_SECRET no está configurada: se rechaza el webhook.")
@@ -731,10 +733,10 @@ def verify_mercado_pago_signature(data_id):
     expected = hmac.new(secret.encode("utf-8"), manifest.encode("utf-8"), hashlib.sha256).hexdigest()
     matches = hmac.compare_digest(expected, received)
     if not matches:
-        # Diagnostico temporal (2026-09-29): no expone la clave, solo hashes y el manifest.
+        # Diagnostico temporal (2026-09-29): no expone la clave, solo su largo, hashes y el manifest.
         app.logger.warning(
-            "Firma de webhook no coincide. manifest=%r x-signature=%r esperado=%s recibido=%s",
-            manifest, request.headers.get("x-signature", ""), expected, received,
+            "Firma de webhook no coincide. secret_len=%d manifest=%r x-signature=%r esperado=%s recibido=%s",
+            len(secret), manifest, request.headers.get("x-signature", ""), expected, received,
         )
     return matches
 
