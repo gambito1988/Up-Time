@@ -56,6 +56,7 @@
             <label>Email del cliente (opcional; permite que el cliente active su cuenta) <input name="email" type="email" maxlength="254" autocomplete="off"></label>
             <label>Trabajo realizado <input name="job" required></label>
             <label>Historial del servicio <textarea name="service_history" rows="4" required></textarea></label>
+            <label style="display:flex; flex-direction:row; align-items:center; gap:.5rem;"><input type="checkbox" name="included_visit" style="width:auto;"> Visita incluida en la membresía (no se factura aparte)</label>
             <button type="submit">Guardar registro</button>
         </form>
     </section>
@@ -88,13 +89,14 @@
     <section id="mensajes">
         <h2>Mensajes de contacto</h2>
         <table>
-            <thead><tr><th>Fecha</th><th>Contacto</th><th>Mensaje</th><th>Estado</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Contacto</th><th>Mensaje</th><th>Prioridad</th><th>Estado</th></tr></thead>
             <tbody>
             {% for message in messages %}
-                <tr>
+                <tr{% if message.priority_rank > 0 %} style="background: rgba(232,163,61,.08);"{% endif %}>
                     <td>{{ message.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
                     <td>{{ message.name }}<br><a href="mailto:{{ message.email }}">{{ message.email }}</a>{% if message.phone %}<br>{{ message.phone }}{% endif %}</td>
                     <td class="wrap-text">{{ message.message }}</td>
+                    <td>{% if message.priority_rank > 0 %}★ {{ message.membership_plan|capitalize }}{% else %}—{% endif %}</td>
                     <td>
                         <form class="status-form" method="post" action="{{ url_for('update_contact_status', message_id=message.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <select name="status" aria-label="Estado del mensaje de {{ message.name }}">
@@ -104,14 +106,14 @@
                         </form>
                     </td>
                 </tr>
-            {% else %}<tr><td colspan="4">Todavia no hay mensajes.</td></tr>{% endfor %}
+            {% else %}<tr><td colspan="5">Todavia no hay mensajes.</td></tr>{% endfor %}
             </tbody>
         </table>
     </section>
     <section id="servicios">
         <h2>Historial de servicios y pagos</h2>
         <table>
-            <thead><tr><th>Usuario</th><th>Trabajo</th><th>Pago</th><th>Historial</th><th>Estado</th><th>Fecha</th><th></th></tr></thead>
+            <thead><tr><th>Usuario</th><th>Trabajo</th><th>Pago</th><th>Historial</th><th>Estado</th><th>Visita incluida</th><th>Fecha</th><th></th></tr></thead>
             <tbody>
             {% for record in records %}
                 <tr>
@@ -127,6 +129,7 @@
                             {% for value, label in service_statuses.items() %}<option value="{{ value }}"{% if value == record.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
                         </select>
                     </td>
+                    <td><input form="servicio-{{ record.id }}" type="checkbox" name="included_visit" style="width:auto;"{% if record.included_visit %} checked{% endif %} aria-label="Visita incluida del servicio de {{ record.username }}"></td>
                     <td>{{ record.created_at }}</td>
                     <td>
                         <button form="servicio-{{ record.id }}" type="submit">Guardar</button>
@@ -135,7 +138,7 @@
                         </form>
                     </td>
                 </tr>
-            {% else %}<tr><td colspan="7">Todavia no hay registros.</td></tr>{% endfor %}
+            {% else %}<tr><td colspan="8">Todavia no hay registros.</td></tr>{% endfor %}
             </tbody>
         </table>
     </section>

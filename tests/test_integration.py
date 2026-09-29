@@ -339,6 +339,33 @@ def test_payment_history_is_visible_in_the_customer_dashboard(user_client, monke
     assert order_reference() in page
 
 
+def test_admin_can_mark_a_service_as_an_included_visit(user_client, app_ctx, monkeypatch):
+    admin = app_ctx.app.test_client()
+    admin_login(admin, monkeypatch)
+    admin.post("/gestion-privada/panel", data={**RECORD, "included_visit": "on"})
+    record_id = service_record_id()
+    assert query("SELECT included_visit FROM service_records WHERE id = %s", (record_id,))[0]["included_visit"] is True
+
+    admin.post(f"/gestion-privada/servicios/{record_id}/editar", data={**RECORD, "status": "pendiente"})  # sin el checkbox
+    assert query("SELECT included_visit FROM service_records WHERE id = %s", (record_id,))[0]["included_visit"] is False
+
+
+def test_customer_dashboard_shows_included_visits_used_this_period(user_client, app_ctx, monkeypatch):
+    start_checkout(user_client, monkeypatch, plan="premium")  # incluye 2 visitas mensuales
+    fake_payment(monkeypatch, order_reference(), 15000)
+    app_module.apply_mercado_pago_payment("111")
+
+    admin = app_ctx.app.test_client()
+    admin_login(admin, monkeypatch)
+    admin.post("/gestion-privada/panel", data={**RECORD, "included_visit": "on"})
+    page = user_client.get("/usuarios").data.decode()
+    assert "Visitas incluidas: 1 de 2 usadas este período." in page
+
+    admin.post("/gestion-privada/panel", data={**RECORD, "job": "Segunda visita", "included_visit": "on"})
+    page = user_client.get("/usuarios").data.decode()
+    assert "Visitas incluidas: 2 de 2 usadas este período." in page
+
+
 def test_return_page_only_applies_own_payments(db, client, sent_emails, monkeypatch):
     register(client)
     confirm(client)
@@ -506,6 +533,24 @@ def test_contact_status_requires_admin(db, client):
     response = client.post("/gestion-privada/mensajes/1/estado", data={"status": "closed"})
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/gestion-privada")
+
+
+def test_contact_messages_from_active_members_appear_first(user_client, client, app_ctx, monkeypatch):
+    # "Atencion prioritaria" dejaba de ser solo texto: los mensajes de socios activos
+    # se muestran primero en el panel, aunque un no-socio haya escrito despues.
+    start_checkout(user_client, monkeypatch, plan="premium")
+    fake_payment(monkeypatch, order_reference(), 15000)
+    app_module.apply_mercado_pago_payment("111")
+
+    monkeypatch.setattr(app_module, "run_in_background", lambda function, *args: None)
+    client.post("/contacto", data={"nombre": "Ana", "email": "ANA@Example.com", "telefono": "", "mensaje": "Socia premium"})
+    client.post("/contacto", data={"nombre": "Bruno", "email": "bruno@example.com", "telefono": "", "mensaje": "No soy socio y escribi despues"})
+
+    admin = app_module.app.test_client()
+    admin_login(admin, monkeypatch)
+    page = admin.get("/gestion-privada/panel").data.decode()
+    assert page.index("Socia premium") < page.index("No soy socio")
+    assert "Premium" in page
 
 
 # --- Edicion y borrado de servicios, y clientes ---------------------------------

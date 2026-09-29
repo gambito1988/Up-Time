@@ -48,10 +48,12 @@ PAYMENT_STATUS_LABELS = {
 }
 MEMBERSHIP_STATE_LABELS = {"active": "Activa", "expired": "Vencida", "inactive": "Sin membresía"}
 MEMBERSHIP_PLANS = {
-    "basic": {"name": "Basic", "price": 5000, "description": "Soporte remoto y prioridad estándar."},
-    "intermedio": {"name": "Intermedio", "price": 9000, "description": "Soporte remoto y una visita mensual."},
-    "premium": {"name": "Premium", "price": 15000, "description": "Atención prioritaria y dos visitas mensuales."},
+    "basic": {"name": "Basic", "price": 5000, "description": "Soporte remoto y prioridad estándar.", "monthly_visits": 0},
+    "intermedio": {"name": "Intermedio", "price": 9000, "description": "Soporte remoto y una visita mensual.", "monthly_visits": 1},
+    "premium": {"name": "Premium", "price": 15000, "description": "Atención prioritaria y dos visitas mensuales.", "monthly_visits": 2},
 }
+# Orden de prioridad de atención por plan: a mayor numero, se atiende antes. 0 = sin membresia activa.
+MEMBERSHIP_PRIORITY_RANK = {"basic": 1, "intermedio": 2, "premium": 3}
 ADMIN_SESSION_SECONDS = 2 * 60 * 60
 PASSWORD_RESET_HOURS = 1
 MEMBERSHIP_DAYS = 30
@@ -135,6 +137,7 @@ def init_db():
                 payment DOUBLE PRECISION NOT NULL DEFAULT 0,
                 service_history TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pendiente',
+                included_visit BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -186,6 +189,9 @@ def init_db():
             connection.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {column} {definition}")
         connection.execute(
             "ALTER TABLE service_records ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pendiente'"
+        )
+        connection.execute(
+            "ALTER TABLE service_records ADD COLUMN IF NOT EXISTS included_visit BOOLEAN NOT NULL DEFAULT FALSE"
         )
         # Membresías activadas antes de que existiera el vencimiento: cuentan desde su inicio.
         connection.execute(
@@ -245,6 +251,15 @@ def membership_state(user):
     if expires and parse_timestamp(expires) < datetime.now(timezone.utc):
         return "expired"
     return "active"
+
+
+def contact_priority_rank(message):
+    """0 si quien escribe no tiene una membresía activa; si la tiene, el rango de su plan
+    (mayor primero). Convierte la "atención prioritaria" de los planes en algo real: estos
+    mensajes se muestran primero en el panel de administración."""
+    if membership_state(message) != "active":
+        return 0
+    return MEMBERSHIP_PRIORITY_RANK.get(message.get("membership_plan"), 0)
 
 
 def user_required(view):
@@ -983,13 +998,25 @@ def user_dashboard():
             "FROM membership_payments WHERE user_id = %s ORDER BY created_at DESC, id DESC",
             (session["user_id"],),
         ).fetchall()
+        current_state = membership_state(user)
+        plan_data = MEMBERSHIP_PLANS.get(user["membership_plan"])
+        visits_included = plan_data["monthly_visits"] if plan_data else 0
+        visits_used = 0
+        if visits_included and current_state == "active" and user["membership_started_at"]:
+            visits_used = connection.execute(
+                "SELECT COUNT(*) AS n FROM service_records "
+                "WHERE user_id = %s AND included_visit AND created_at >= %s",
+                (session["user_id"], user["membership_started_at"]),
+            ).fetchone()["n"]
     return render_template(
         "user_dashboard.html",
         user=user,
         records=records,
         payments=payments,
         payment_status_labels=PAYMENT_STATUS_LABELS,
-        membership_state=membership_state(user),
+        membership_state=current_state,
+        visits_included=visits_included,
+        visits_used=visits_used,
     )
 
 
@@ -1186,9 +1213,22 @@ def load_admin_data():
             """
         ).fetchall()
         messages = connection.execute(
-            "SELECT id, name, email, phone, message, status, created_at FROM contact_messages "
-            "ORDER BY created_at DESC, id DESC LIMIT 100"
+            """
+            SELECT contact_messages.id, contact_messages.name, contact_messages.email,
+                   contact_messages.phone, contact_messages.message, contact_messages.status,
+                   contact_messages.created_at, users.membership_status, users.membership_plan,
+                   users.membership_expires_at
+            FROM contact_messages
+            LEFT JOIN users ON LOWER(users.email) = LOWER(contact_messages.email)
+            ORDER BY contact_messages.created_at DESC, contact_messages.id DESC
+            LIMIT 100
+            """
         ).fetchall()
+        # Mensajes de socios con membresía activa primero (más arriba cuanto mejor el plan);
+        # el orden por fecha de la consulta se mantiene dentro de cada grupo (sort es estable).
+        for message in messages:
+            message["priority_rank"] = contact_priority_rank(message)
+        messages.sort(key=lambda message: -message["priority_rank"])
     return {
         "users": users,
         "records": records,
@@ -1273,6 +1313,7 @@ def update_service_record(record_id):
     service_history = request.form.get("service_history", "").strip()
     payment_text = request.form.get("payment", "0").strip().replace(",", ".")
     status = request.form.get("status", "")
+    included_visit = request.form.get("included_visit") == "on"
     try:
         payment = float(payment_text)
     except ValueError:
@@ -1287,9 +1328,9 @@ def update_service_record(record_id):
 
     with get_db() as connection:
         connection.execute(
-            "UPDATE service_records SET job = %s, payment = %s, service_history = %s, status = %s "
-            "WHERE id = %s",
-            (job, payment, service_history, status, record_id),
+            "UPDATE service_records SET job = %s, payment = %s, service_history = %s, status = %s, "
+            "included_visit = %s WHERE id = %s",
+            (job, payment, service_history, status, included_visit, record_id),
         )
     return redirect(url_for("admin_dashboard") + "#servicios")
 
@@ -1311,6 +1352,7 @@ def admin_dashboard():
         job = request.form.get("job", "").strip()
         service_history = request.form.get("service_history", "").strip()
         payment_text = request.form.get("payment", "0").strip().replace(",", ".")
+        included_visit = request.form.get("included_visit") == "on"
 
         def form_error(message):
             return render_template("admin_dashboard.html", **load_admin_data(), error=message), 400
@@ -1353,10 +1395,10 @@ def admin_dashboard():
                     connection.execute("UPDATE users SET email = %s WHERE id = %s", (email, user["id"]))
                 connection.execute(
                     """
-                    INSERT INTO service_records (user_id, job, payment, service_history)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO service_records (user_id, job, payment, service_history, included_visit)
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
-                    (user["id"], job, payment, service_history),
+                    (user["id"], job, payment, service_history, included_visit),
                 )
         except INTEGRITY_ERRORS:
             return form_error("No se pudo guardar: el nombre o el email ya existen.")
