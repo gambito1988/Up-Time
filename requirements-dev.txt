@@ -1,2 +1,5 @@
 -r requirements.txt
 pytest>=8,<10
+# Alembic: preparado pero sin usar en produccion (ver migrations/README.md).
+alembic>=1.13,<2
+SQLAlchemy>=2.0,<3
