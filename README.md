@@ -8,6 +8,8 @@ La aplicación usa **PostgreSQL** (Supabase). Define `DATABASE_URL` con la caden
 
 El esquema se crea y actualiza solo al recibir la primera petición, y activa Row Level Security en todas las tablas.
 
+Hay un andamiaje de Alembic preparado en `migrations/` para el día que haga falta un cambio de esquema más complejo que agregar una columna, pero todavía no está en uso: ver [migrations/README.md](migrations/README.md).
+
 ## Desarrollo local
 
 ```powershell
