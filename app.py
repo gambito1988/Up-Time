@@ -217,6 +217,10 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS membership_payments_user_id_idx "
             "ON membership_payments(user_id)"
         )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS service_records_user_id_idx "
+            "ON service_records(user_id)"
+        )
         # Supabase expone el esquema public por su API REST con la clave anon (pública).
         # Con RLS activo y sin políticas, esa API no puede leer ni escribir estas tablas;
         # la aplicación no se ve afectada porque se conecta con el rol propietario.

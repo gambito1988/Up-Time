@@ -81,6 +81,13 @@ def test_init_db_is_idempotent_and_enables_rls(db):
     assert len(tables) == 3 and all(row["relrowsecurity"] for row in tables)
 
 
+def test_service_records_user_id_is_indexed(db):
+    # El advisor de Supabase marco esta FK sin indice de cobertura; evita escaneos secuenciales
+    # al listar el historial de un cliente.
+    rows = query("SELECT indexname FROM pg_indexes WHERE tablename = 'service_records'")
+    assert any(row["indexname"] == "service_records_user_id_idx" for row in rows)
+
+
 def test_init_db_backfills_expiry_of_legacy_memberships(db):
     query("INSERT INTO users (username, membership_status, membership_started_at) "
           "VALUES ('vieja', 'active', '2026-01-01T00:00:00Z') RETURNING id")
