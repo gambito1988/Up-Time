@@ -729,7 +729,14 @@ def verify_mercado_pago_signature(data_id):
         manifest += f"request-id:{request_id};"
     manifest += f"ts:{timestamp};"
     expected = hmac.new(secret.encode("utf-8"), manifest.encode("utf-8"), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, received)
+    matches = hmac.compare_digest(expected, received)
+    if not matches:
+        # Diagnostico temporal (2026-09-29): no expone la clave, solo hashes y el manifest.
+        app.logger.warning(
+            "Firma de webhook no coincide. manifest=%r x-signature=%r esperado=%s recibido=%s",
+            manifest, request.headers.get("x-signature", ""), expected, received,
+        )
+    return matches
 
 
 @app.get("/usuarios/registro")
