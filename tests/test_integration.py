@@ -81,6 +81,13 @@ def test_init_db_is_idempotent_and_enables_rls(db):
     assert len(tables) == 3 and all(row["relrowsecurity"] for row in tables)
 
 
+def test_service_records_user_id_is_indexed(db):
+    # El advisor de Supabase marco esta FK sin indice de cobertura; evita escaneos secuenciales
+    # al listar el historial de un cliente.
+    rows = query("SELECT indexname FROM pg_indexes WHERE tablename = 'service_records'")
+    assert any(row["indexname"] == "service_records_user_id_idx" for row in rows)
+
+
 def test_init_db_backfills_expiry_of_legacy_memberships(db):
     query("INSERT INTO users (username, membership_status, membership_started_at) "
           "VALUES ('vieja', 'active', '2026-01-01T00:00:00Z') RETURNING id")
@@ -300,6 +307,36 @@ def test_refund_deactivates_membership(user_client, monkeypatch):
     assert app_module.apply_mercado_pago_payment("111") is False
     assert query("SELECT membership_status FROM users")[0]["membership_status"] == "inactive"
     assert query("SELECT status FROM membership_payments")[0]["status"] == "refunded"
+
+
+def test_customer_can_cancel_an_active_membership(user_client, monkeypatch):
+    start_checkout(user_client, monkeypatch)
+    fake_payment(monkeypatch, order_reference(), 5000)
+    app_module.apply_mercado_pago_payment("111")
+    assert b"Cancelar membres\xc3\xada" in user_client.get("/usuarios").data
+
+    response = user_client.post("/usuarios/membresia/cancelar")
+    assert response.status_code == 302
+    assert query("SELECT membership_status FROM users")[0]["membership_status"] == "inactive"
+    page = user_client.get("/usuarios").data
+    assert b"Inactiva" in page and b"Cancelar membres\xc3\xada" not in page
+
+    # No refund: la fila de membership_payments sigue aprobada, esto solo apaga el acceso.
+    assert query("SELECT status FROM membership_payments")[0]["status"] == "approved"
+
+
+def test_cancel_membership_without_an_active_one_is_a_no_op(user_client):
+    assert user_client.post("/usuarios/membresia/cancelar").status_code == 302
+    assert query("SELECT membership_status FROM users")[0]["membership_status"] == "inactive"
+
+
+def test_payment_history_is_visible_in_the_customer_dashboard(user_client, monkeypatch):
+    start_checkout(user_client, monkeypatch, plan="premium")
+    fake_payment(monkeypatch, order_reference(), 15000)
+    app_module.apply_mercado_pago_payment("111")
+    page = user_client.get("/usuarios").data.decode()
+    assert "Historial de pagos" in page and "Premium" in page and "15000.00" in page and "Aprobado" in page
+    assert order_reference() in page
 
 
 def test_return_page_only_applies_own_payments(db, client, sent_emails, monkeypatch):

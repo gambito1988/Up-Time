@@ -47,3 +47,15 @@ services:
         sync: false
       - key: MERCADOPAGO_SANDBOX
         value: "false"
+      - key: RATELIMIT_STORAGE_URI
+        fromService:
+          name: up-time-ratelimit
+          type: keyvalue
+          property: connectionString
+
+  - type: keyvalue
+    name: up-time-ratelimit
+    plan: free
+    region: ohio
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []

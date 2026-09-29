@@ -229,6 +229,12 @@ def test_user_pages_redirect_to_login(client, path):
     assert "/usuarios/login" in response.headers["Location"]
 
 
+def test_cancel_membership_requires_login(client):
+    response = client.post("/usuarios/membresia/cancelar")
+    assert response.status_code == 302
+    assert "/usuarios/login" in response.headers["Location"]
+
+
 def test_admin_panel_redirects_when_anonymous(client):
     response = client.get("/gestion-privada/panel")
     assert response.status_code == 302

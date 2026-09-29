@@ -28,6 +28,8 @@ Configura `MERCADOPAGO_ACCESS_TOKEN` y, en el panel de Mercado Pago (Webhooks), 
 
 Consulta [docs/herramientas-claude-code.md](docs/herramientas-claude-code.md) para instalar Graphify, claude-mem, Headroom, OmniRoute, claude-code-setup y task-observer.
 
+`package.json`, `package-lock.json` y `skills-lock.json` son del skill de Supabase instalado para Claude Code (`.agents/skills/supabase-server`), no de la aplicación Flask: esta app no usa Node ni el paquete `@supabase/server`, solo `psycopg` contra `DATABASE_URL`. `render.yaml` no corre `npm install`, así que no afectan el deploy. Se mantienen porque dan contexto útil a Claude en este repo.
+
 ## Pruebas
 
 ```powershell
