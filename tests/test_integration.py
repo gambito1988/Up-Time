@@ -254,14 +254,14 @@ def test_checkout_creates_order_with_server_side_price(user_client, monkeypatch)
     response, calls = start_checkout(user_client, monkeypatch, plan="premium")
     assert response.status_code == 303 and response.headers["Location"] == "https://mp.example/checkout"
     order = query("SELECT * FROM membership_payments")[0]
-    assert order["plan"] == "premium" and order["amount"] == 15000 and order["preference_id"] == "pref-1"
-    assert calls[0][1]["items"][0]["unit_price"] == 15000
+    assert order["plan"] == "premium" and order["amount"] == 65000 and order["preference_id"] == "pref-1"
+    assert calls[0][1]["items"][0]["unit_price"] == 65000
     assert calls[0][1]["external_reference"] == order["payment_reference"]
 
 
 def test_approved_payment_activates_membership_for_30_days_and_renewal_extends(user_client, monkeypatch):
     start_checkout(user_client, monkeypatch)
-    fake_payment(monkeypatch, order_reference(), 5000)
+    fake_payment(monkeypatch, order_reference(), 35000)
     assert app_module.apply_mercado_pago_payment("111") is True
 
     user = query("SELECT * FROM users")[0]
@@ -275,7 +275,7 @@ def test_approved_payment_activates_membership_for_30_days_and_renewal_extends(u
     assert query("SELECT membership_expires_at FROM users")[0]["membership_expires_at"] == first_expiry
 
     start_checkout(user_client, monkeypatch)  # renovación: suma otros 30 días
-    fake_payment(monkeypatch, order_reference(), 5000)
+    fake_payment(monkeypatch, order_reference(), 35000)
     assert app_module.apply_mercado_pago_payment("222") is True
     renewed = query("SELECT membership_expires_at FROM users")[0]["membership_expires_at"]
     assert renewed - first_expiry == timedelta(days=30)
@@ -283,7 +283,7 @@ def test_approved_payment_activates_membership_for_30_days_and_renewal_extends(u
 
 def test_expired_membership_is_shown_as_expired(user_client, monkeypatch):
     start_checkout(user_client, monkeypatch)
-    fake_payment(monkeypatch, order_reference(), 5000)
+    fake_payment(monkeypatch, order_reference(), 35000)
     app_module.apply_mercado_pago_payment("111")
     query("UPDATE users SET membership_expires_at = now() - interval '2 days' RETURNING id")
     page = user_client.get("/usuarios").data
@@ -301,9 +301,9 @@ def test_payment_with_wrong_amount_does_not_activate(user_client, monkeypatch):
 def test_refund_deactivates_membership(user_client, monkeypatch):
     start_checkout(user_client, monkeypatch)
     reference = order_reference()
-    fake_payment(monkeypatch, reference, 5000)
+    fake_payment(monkeypatch, reference, 35000)
     app_module.apply_mercado_pago_payment("111")
-    fake_payment(monkeypatch, reference, 5000, status="refunded")
+    fake_payment(monkeypatch, reference, 35000, status="refunded")
     assert app_module.apply_mercado_pago_payment("111") is False
     assert query("SELECT membership_status FROM users")[0]["membership_status"] == "inactive"
     assert query("SELECT status FROM membership_payments")[0]["status"] == "refunded"
@@ -311,7 +311,7 @@ def test_refund_deactivates_membership(user_client, monkeypatch):
 
 def test_customer_can_cancel_an_active_membership(user_client, monkeypatch):
     start_checkout(user_client, monkeypatch)
-    fake_payment(monkeypatch, order_reference(), 5000)
+    fake_payment(monkeypatch, order_reference(), 35000)
     app_module.apply_mercado_pago_payment("111")
     assert b"Cancelar membres\xc3\xada" in user_client.get("/usuarios").data
 
@@ -332,10 +332,10 @@ def test_cancel_membership_without_an_active_one_is_a_no_op(user_client):
 
 def test_payment_history_is_visible_in_the_customer_dashboard(user_client, monkeypatch):
     start_checkout(user_client, monkeypatch, plan="premium")
-    fake_payment(monkeypatch, order_reference(), 15000)
+    fake_payment(monkeypatch, order_reference(), 65000)
     app_module.apply_mercado_pago_payment("111")
     page = user_client.get("/usuarios").data.decode()
-    assert "Historial de pagos" in page and "Premium" in page and "15000.00" in page and "Aprobado" in page
+    assert "Historial de pagos" in page and "Premium" in page and "65000.00" in page and "Aprobado" in page
     assert order_reference() in page
 
 
@@ -352,7 +352,7 @@ def test_admin_can_mark_a_service_as_an_included_visit(user_client, app_ctx, mon
 
 def test_customer_dashboard_shows_included_visits_used_this_period(user_client, app_ctx, monkeypatch):
     start_checkout(user_client, monkeypatch, plan="premium")  # incluye 2 visitas mensuales
-    fake_payment(monkeypatch, order_reference(), 15000)
+    fake_payment(monkeypatch, order_reference(), 65000)
     app_module.apply_mercado_pago_payment("111")
 
     admin = app_ctx.app.test_client()
@@ -377,14 +377,14 @@ def test_return_page_only_applies_own_payments(db, client, sent_emails, monkeypa
     confirm(other, email="beto@example.com")
     login(other, email="beto@example.com")
 
-    fake_payment(monkeypatch, reference, 5000)
+    fake_payment(monkeypatch, reference, 35000)
     assert b"Membres\xc3\xada activada" not in other.get("/membresias/pago/resultado?payment_id=111").data
     assert b"Membres\xc3\xada activada" in client.get("/membresias/pago/resultado?payment_id=111").data
 
 
 def test_webhook_activates_membership_end_to_end(user_client, monkeypatch):
     start_checkout(user_client, monkeypatch)
-    fake_payment(monkeypatch, order_reference(), 5000)
+    fake_payment(monkeypatch, order_reference(), 35000)
     monkeypatch.delenv("MERCADOPAGO_WEBHOOK_SECRET", raising=False)
     response = user_client.application.test_client().post(
         "/pagos/mercado-pago/webhook", json={"type": "payment", "data": {"id": "111"}})
@@ -539,7 +539,7 @@ def test_contact_messages_from_active_members_appear_first(user_client, client, 
     # "Atencion prioritaria" dejaba de ser solo texto: los mensajes de socios activos
     # se muestran primero en el panel, aunque un no-socio haya escrito despues.
     start_checkout(user_client, monkeypatch, plan="premium")
-    fake_payment(monkeypatch, order_reference(), 15000)
+    fake_payment(monkeypatch, order_reference(), 65000)
     app_module.apply_mercado_pago_payment("111")
 
     monkeypatch.setattr(app_module, "run_in_background", lambda function, *args: None)
