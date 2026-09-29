@@ -27,7 +27,7 @@ PASSWORD = "clave-segura-1"
 def db(app_ctx):
     app_ctx.init_db()
     with app_ctx.get_db() as connection:
-        connection.execute("TRUNCATE membership_payments, service_records, users RESTART IDENTITY CASCADE")
+        connection.execute("TRUNCATE membership_payments, service_records, contact_messages, users RESTART IDENTITY CASCADE")
     app_ctx.init_db()  # recrea los índices que alguna prueba haya quitado
     return app_ctx
 
@@ -441,3 +441,31 @@ def test_admin_adds_email_to_existing_customer_and_rejects_conflicts(db, app_ctx
                       ).status_code == 400
     assert [row["username"] for row in query("SELECT username FROM users")] == ["Ana"]
     assert len(query("SELECT id FROM service_records")) == 2  # las solicitudes rechazadas no guardan nada
+
+
+# --- Mensajes de contacto ---------------------------------------------------------
+
+CONTACT = {"nombre": "Ana", "email": "ana@example.com", "telefono": "11 5555", "mensaje": "No enciende"}
+
+
+def test_contact_message_is_saved_and_managed_from_the_admin_panel(db, client, monkeypatch):
+    monkeypatch.setattr(app_module, "run_in_background", lambda function, *args: None)
+    assert client.post("/contacto", data=CONTACT).status_code == 303
+    rows = query("SELECT name, email, phone, message, status FROM contact_messages")
+    assert rows == [{"name": "Ana", "email": "ana@example.com", "phone": "11 5555", "message": "No enciende", "status": "new"}]
+
+    admin = app_module.app.test_client()
+    admin_login(admin, monkeypatch)
+    page = admin.get("/gestion-privada/panel").data.decode()
+    assert "No enciende" in page and "ana@example.com" in page
+
+    message_id = query("SELECT id FROM contact_messages")[0]["id"]
+    assert admin.post(f"/gestion-privada/mensajes/{message_id}/estado", data={"status": "replied"}).status_code == 302
+    assert query("SELECT status FROM contact_messages")[0]["status"] == "replied"
+    assert admin.post(f"/gestion-privada/mensajes/{message_id}/estado", data={"status": "otro"}).status_code == 400
+
+
+def test_contact_status_requires_admin(db, client):
+    response = client.post("/gestion-privada/mensajes/1/estado", data={"status": "closed"})
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/gestion-privada")

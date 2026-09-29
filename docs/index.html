@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Up Time | Caso de estudio</title>
+<meta name="description" content="Caso de estudio de Up Time: aplicación web en Flask y PostgreSQL con pagos de Mercado Pago, seguridad de cuentas y pruebas de integración.">
+<meta property="og:title" content="Up Time | Caso de estudio">
+<meta property="og:description" content="Aplicación web en Flask y PostgreSQL con pagos de Mercado Pago, seguridad de cuentas y pruebas de integración.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #eef2f5;
+    --surface: #ffffff;
+    --ink: #13212c;
+    --ink-soft: #46586a;
+    --line: #cfd8e0;
+    --accent: #0b6f86;
+    --accent-ink: #ffffff;
+    --accent-wash: #dcedf1;
+    --ok: #1c7a4a;
+    --warn: #9a5b00;
+    --warn-wash: #f7ead2;
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0f1a22;
+      --surface: #16252f;
+      --ink: #e6edf2;
+      --ink-soft: #a3b4c2;
+      --line: #2a3d4a;
+      --accent: #56c2d9;
+      --accent-ink: #0a1a22;
+      --accent-wash: #16343f;
+      --ok: #62d195;
+      --warn: #f0b862;
+      --warn-wash: #33291a;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0f1a22;
+    --surface: #16252f;
+    --ink: #e6edf2;
+    --ink-soft: #a3b4c2;
+    --line: #2a3d4a;
+    --accent: #56c2d9;
+    --accent-ink: #0a1a22;
+    --accent-wash: #16343f;
+    --ok: #62d195;
+    --warn: #f0b862;
+    --warn-wash: #33291a;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.6;
+    padding-inline: 20px;
+    padding-block: 48px 72px;
+  }
+  .page { max-width: 880px; margin-inline: auto; display: flex; flex-direction: column; gap: 56px; }
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.1; }
+  p { margin: 0; max-width: 65ch; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+  .mono { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+
+  header { display: flex; flex-direction: column; gap: 20px; }
+  .kicker { color: var(--accent); }
+  h1 { font-size: clamp(44px, 9vw, 76px); font-weight: 800; letter-spacing: -0.02em; }
+  .lede { font-size: 20px; color: var(--ink-soft); max-width: 60ch; }
+  .links { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn {
+    font-family: var(--display); font-weight: 700; font-size: 15px; text-decoration: none;
+    padding: 10px 18px; border: 2px solid var(--accent); color: var(--accent); background: transparent;
+  }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); }
+  .btn:hover { filter: brightness(1.08); }
+
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0; border-top: 2px solid var(--ink); }
+  .facts div { padding: 14px 16px 14px 0; border-bottom: 1px solid var(--line); }
+  .facts dt { color: var(--ink-soft); margin-bottom: 4px; }
+  .facts dd { margin: 0; font-weight: 600; }
+
+  section { display: flex; flex-direction: column; gap: 22px; }
+  h2 { font-size: clamp(26px, 4.5vw, 34px); font-weight: 700; letter-spacing: -0.01em; }
+
+  .decision { display: grid; grid-template-columns: 150px 1fr; gap: 8px 28px; padding-top: 24px; border-top: 1px solid var(--line); }
+  .decision + .decision { margin-top: 4px; }
+  .area { color: var(--accent); padding-top: 6px; }
+  .decision h3 { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
+  .decision-body { display: flex; flex-direction: column; gap: 12px; }
+  .decision-body ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; max-width: 65ch; }
+  .decision-body li::marker { color: var(--accent); }
+  .why { color: var(--ink-soft); }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--accent-wash); padding: 1px 6px; }
+
+  .diagram-wrap { background: var(--surface); border: 1px solid var(--line); padding: 20px; overflow-x: auto; }
+  .diagram-wrap pre.mermaid { margin: 0; min-width: 600px; text-align: center; }
+  .caption { color: var(--ink-soft); font-size: 15px; }
+
+  .stack { display: grid; grid-template-columns: 150px 1fr; gap: 0; border-top: 2px solid var(--ink); }
+  .stack dt, .stack dd { margin: 0; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .stack dt { color: var(--ink-soft); padding-right: 16px; }
+
+  .next { display: flex; flex-direction: column; gap: 0; border-top: 2px solid var(--ink); }
+  .next-item { display: grid; grid-template-columns: 150px 1fr; gap: 6px 28px; padding: 14px 0; border-bottom: 1px solid var(--line); align-items: start; }
+  .tag { display: inline-block; padding: 2px 8px; width: fit-content; }
+  .tag.open { background: var(--warn-wash); color: var(--warn); }
+  .tag.done { background: var(--accent-wash); color: var(--ok); }
+
+  footer { color: var(--ink-soft); font-size: 15px; border-top: 1px solid var(--line); padding-top: 20px; }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; padding-block: 32px 56px; }
+    .decision, .next-item, .stack { grid-template-columns: 1fr; }
+    .stack dt { border-bottom: 0; padding-bottom: 0; }
+    .stack dd { padding-top: 2px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <p class="kicker mono">Caso de estudio · Aplicación web full stack</p>
+    <h1>Up Time</h1>
+    <p class="lede">Sitio de servicio técnico para computadoras en CABA, con cuentas de clientes, membresías pagas con Mercado Pago y un panel privado de administración.</p>
+    <div class="links">
+      <a class="btn primary" href="https://up-time-jfzd.onrender.com/" target="_blank" rel="noopener noreferrer">Ver el sitio</a>
+      <a class="btn" href="https://github.com/gambito1988/Up-Time" target="_blank" rel="noopener noreferrer">Ver el código</a>
+    </div>
+  </header>
+
+  <dl class="facts">
+    <div><dt class="mono">Stack</dt><dd>Flask, PostgreSQL, Mercado Pago</dd></div>
+    <div><dt class="mono">Hosting</dt><dd>Render y Supabase</dd></div>
+    <div><dt class="mono">Desarrollo</dt><dd>34 commits, del 28 de agosto de 2026 a la fecha</dd></div>
+    <div><dt class="mono">Pruebas</dt><dd>64 funciones de prueba, unitarias y de integración</dd></div>
+  </dl>
+
+  <section>
+    <h2>El problema</h2>
+    <p>Un servicio técnico necesita más que una landing: que el cliente pueda registrarse, pagar su plan, ver su historial de servicios y repetir un pedido, y que el administrador cargue los trabajos sin perder el vínculo con la cuenta del cliente.</p>
+    <p>Cobrar plata online y guardar datos personales obliga a resolver cosas que una landing no tiene: pagos que no se puedan falsear, cuentas que nadie pueda tomar por error y una base que no se rompa al crecer.</p>
+  </section>
+
+  <section>
+    <h2>Cómo se activa una membresía</h2>
+    <p>El navegador nunca decide si un pago es válido. La membresía se activa solo cuando llega el aviso firmado de Mercado Pago y coincide con el pedido guardado.</p>
+    <div class="diagram-wrap">
+<pre class="mermaid">
+sequenceDiagram
+    participant C as Cliente
+    participant F as Flask
+    participant M as Mercado Pago
+    participant D as PostgreSQL
+    C->>F: Elige un plan
+    F->>D: Guarda el pedido con su referencia y monto
+    F->>M: Crea la preferencia de pago
+    M-->>C: Pantalla de pago
+    C->>M: Paga
+    M->>F: Webhook con firma x-signature
+    F->>F: Verifica firma, monto y moneda
+    F->>D: Activa 30 dias y marca el pedido aprobado
+    M-->>F: Reembolso o contracargo
+    F->>D: Desactiva la membresia
+</pre>
+    </div>
+    <p class="caption">Flujo de pago de una membresía. El webhook es el único camino que activa o desactiva una cuenta.</p>
+  </section>
+
+  <section>
+    <h2>Decisiones técnicas</h2>
+
+    <article class="decision">
+      <div class="area mono">Pagos</div>
+      <div class="decision-body">
+        <h3>Un webhook que no se puede engañar</h3>
+        <p>Cualquiera que conozca la URL podía enviar un pago falso y activar una membresía gratis.</p>
+        <ul>
+          <li>Se verifica la firma <code>x-signature</code> de cada notificación con la clave secreta del webhook.</li>
+          <li>Se valida que el monto y la moneda coincidan con el pedido guardado.</li>
+          <li>El procesamiento es idempotente: repetir una notificación no suma días dos veces, y un pedido aprobado no se pisa.</li>
+          <li>Un reembolso o un contracargo desactivan la membresía.</li>
+          <li>En producción, si falta la clave secreta, el webhook rechaza todo en lugar de aceptar con un aviso.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="decision">
+      <div class="area mono">Seguridad</div>
+      <div class="decision-body">
+        <h3>Defensas en cada formulario</h3>
+        <ul>
+          <li>Protección CSRF en todos los formularios con Flask-WTF. Solo quedan exentos el webhook y el formulario de contacto de la landing, que viene de otro origen.</li>
+          <li>Límite de intentos con Flask-Limiter en login, registro, recuperación de contraseña, contacto y panel de admin.</li>
+          <li>Cookies de sesión <code>HttpOnly</code>, <code>SameSite=Lax</code> y <code>Secure</code> en producción. La sesión del admin vence a las 2 horas.</li>
+          <li>Corrección de una redirección abierta en el parámetro <code>next</code> del login.</li>
+          <li>Recuperación de contraseña con token guardado como hash y de un solo uso.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="decision">
+      <div class="area mono">Cuentas</div>
+      <div class="decision-body">
+        <h3>Reclamar una cuenta sin poder robar la de otro</h3>
+        <p>El administrador carga los servicios de un cliente antes de que este se registre. Cuando el cliente aparece, tiene que quedarse con su historial.</p>
+        <p class="why">El riesgo es que alguien escriba el email de otra persona y se apropie de su cuenta. Por eso el registro nunca fija la contraseña: si el nombre y el email coinciden con una cuenta sin activar, se envía un enlace de una hora al email para que el dueño real elija su clave. Al usarlo, el email queda confirmado.</p>
+        <ul>
+          <li>Nombre de usuario y email son únicos sin distinguir mayúsculas, con índices únicos sobre <code>LOWER(...)</code>.</li>
+          <li>Si la base ya tiene duplicados, el índice no se crea y se avisa en el log, para no impedir el arranque.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="decision">
+      <div class="area mono">Datos</div>
+      <div class="decision-body">
+        <h3>De SQLite a PostgreSQL en Supabase</h3>
+        <ul>
+          <li>Se eliminó el soporte de SQLite: la aplicación usa una sola base, la misma en desarrollo y en producción.</li>
+          <li>El esquema se crea y se actualiza solo en la primera petición, con Row Level Security activado en todas las tablas.</li>
+          <li>La conexión usa el Session pooler de Supabase, porque Render opera sobre IPv4 y la conexión directa requiere IPv6.</li>
+          <li>Sin <code>SECRET_KEY</code> ni <code>DATABASE_URL</code> la aplicación no arranca en producción, en lugar de correr con valores por defecto.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="decision">
+      <div class="area mono">Negocio</div>
+      <div class="decision-body">
+        <h3>Membresías con vencimiento</h3>
+        <ul>
+          <li>Cada pago aprobado suma 30 días. Renovar antes de vencer suma sobre los días que quedan, así el cliente no pierde lo que ya pagó.</li>
+          <li>La cuenta muestra la vigencia, marca "Vencida" y ofrece renovar.</li>
+          <li>Las membresías activas anteriores a este cambio recibieron su vencimiento a partir de su fecha de inicio, sin intervención manual.</li>
+          <li>No hay cobro recurrente: el cliente paga cada período.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="decision">
+      <div class="area mono">Calidad</div>
+      <div class="decision-body">
+        <h3>Pruebas contra una base real</h3>
+        <p>Las pruebas unitarias corren sin configuración, con una base simulada. Las de integración cubren registro, confirmación de email, login, recuperación de contraseña, panel de admin y pagos contra PostgreSQL de verdad.</p>
+        <p class="why">Esas pruebas vacían las tablas, así que tienen una guarda: solo se ejecutan si la variable <code>TEST_DATABASE_URL</code> apunta a una base cuyo nombre contiene "test". Eso evita borrar producción por un error de configuración.</p>
+      </div>
+    </article>
+  </section>
+
+  <section>
+    <h2>Stack</h2>
+    <dl class="stack">
+      <dt class="mono">Backend</dt><dd>Python, Flask 3.1, gunicorn</dd>
+      <dt class="mono">Base de datos</dt><dd>PostgreSQL en Supabase, con psycopg 3</dd>
+      <dt class="mono">Seguridad</dt><dd>Flask-WTF (CSRF), Flask-Limiter, email-validator</dd>
+      <dt class="mono">Pagos</dt><dd>Mercado Pago (preferencias y webhook firmado)</dd>
+      <dt class="mono">Email</dt><dd>SMTP para confirmación de cuenta y recuperación de contraseña</dd>
+      <dt class="mono">Despliegue</dt><dd>Render, con <code>render.yaml</code> y health check en <code>/healthz</code></dd>
+      <dt class="mono">Pruebas</dt><dd>pytest, con integración contra PostgreSQL</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Lo que sigue</h2>
+    <p>Estos son los puntos que quedan abiertos, ordenados por impacto.</p>
+    <div class="next">
+      <div class="next-item"><span class="tag open mono">Abierto</span><p><strong>Email por API.</strong> Pasar de SMTP a un servicio por HTTPS. El plan gratuito de Render restringe los puertos SMTP, así que conviene verificarlo y migrar, con dominio propio y registros SPF, DKIM y DMARC.</p></div>
+      <div class="next-item"><span class="tag open mono">Abierto</span><p><strong>Formulario de contacto.</strong> Hoy solo redirige a WhatsApp. Falta guardar cada mensaje en la base, avisar por email y mostrarlos en el panel.</p></div>
+      <div class="next-item"><span class="tag open mono">Abierto</span><p><strong>Avisos de vencimiento</strong> y confirmación de pago por email.</p></div>
+      <div class="next-item"><span class="tag open mono">Abierto</span><p><strong>Límite de intentos compartido.</strong> El almacenamiento en memoria es por proceso; con varios workers hace falta Redis.</p></div>
+      <div class="next-item"><span class="tag open mono">Abierto</span><p><strong>Migraciones versionadas.</strong> El esquema se migra al arrancar; con más tablas conviene pasar a Alembic.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    Caso de estudio del proyecto Up Time. Las cifras de commits y pruebas corresponden al repositorio al 25 de septiembre de 2026.
+  </footer>
+
+</div>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "default", securityLevel: "strict" });
+</script>
+</body>
+</html>

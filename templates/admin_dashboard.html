@@ -32,6 +32,10 @@
         th, td { padding: .7rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
         th { color: var(--muted); font: 500 .75rem 'IBM Plex Mono', monospace; text-transform: uppercase; }
         .error { color: #ffaaa3; }
+        a { color: var(--accent); }
+        select { padding: .7rem; border-radius: 3px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: 1rem 'Source Sans 3', Arial, sans-serif; }
+        .status-form { display: flex; gap: .5rem; align-items: center; }
+        .wrap-text { min-width: 16rem; white-space: pre-wrap; overflow-wrap: anywhere; }
         @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } header { align-items: flex-start; flex-direction: column; } table { display: block; overflow-x: auto; white-space: nowrap; } }
     </style>
 </head>
@@ -54,6 +58,29 @@
             <label>Historial del servicio <textarea name="service_history" rows="4" required></textarea></label>
             <button type="submit">Guardar registro</button>
         </form>
+    </section>
+    <section id="mensajes">
+        <h2>Mensajes de contacto</h2>
+        <table>
+            <thead><tr><th>Fecha</th><th>Contacto</th><th>Mensaje</th><th>Estado</th></tr></thead>
+            <tbody>
+            {% for message in messages %}
+                <tr>
+                    <td>{{ message.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+                    <td>{{ message.name }}<br><a href="mailto:{{ message.email }}">{{ message.email }}</a>{% if message.phone %}<br>{{ message.phone }}{% endif %}</td>
+                    <td class="wrap-text">{{ message.message }}</td>
+                    <td>
+                        <form class="status-form" method="post" action="{{ url_for('update_contact_status', message_id=message.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <select name="status" aria-label="Estado del mensaje de {{ message.name }}">
+                                {% for value, label in statuses.items() %}<option value="{{ value }}"{% if value == message.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                            </select>
+                            <button type="submit">Guardar</button>
+                        </form>
+                    </td>
+                </tr>
+            {% else %}<tr><td colspan="4">Todavia no hay mensajes.</td></tr>{% endfor %}
+            </tbody>
+        </table>
     </section>
     <section>
         <h2>Historial de servicios y pagos</h2>
