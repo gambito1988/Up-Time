@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Botón de arrepentimiento | Up Time{% endblock %}
+{% block meta_description %}Ejercé tu derecho de arrepentimiento sobre una membresía contratada online, dentro de los 10 días corridos, según la Ley 24.240.{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<section class="panel">
+    <p class="muted">DERECHO DE ARREPENTIMIENTO</p>
+    <h1>Botón de arrepentimiento</h1>
+    <p>Si contrataste una membresía a distancia (online), tenés derecho a arrepentirte dentro de los {{ withdrawal_days }} días corridos desde la contratación, sin costo ni necesidad de justificar el motivo, conforme al artículo 34 de la Ley 24.240 y la Resolución 424/2020.</p>
+    <p class="muted">Al enviar este formulario registramos tu solicitud y te contactamos por email para coordinar el reembolso, por el mismo medio de pago que usaste.</p>
+    {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+    <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Tu nombre <input name="nombre" required maxlength="100"></label>
+        <label>Tu email <input name="email" type="email" required maxlength="254"></label>
+        <label>¿Qué compra querés desistir? (plan y fecha aproximada del pago) <input name="referencia" required maxlength="200" placeholder="Ej: Plan Intermedio, pagado el 20/09/2026"></label>
+        <label>Motivo (opcional) <textarea name="motivo" rows="3" maxlength="2000"></textarea></label>
+        <button type="submit">Enviar solicitud de arrepentimiento</button>
+    </form>
+    <p class="muted">¿Preferís escribirnos directamente? Mandanos un email a <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>.</p>
+</section>
+{% endblock %}

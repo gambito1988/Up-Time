@@ -59,6 +59,32 @@
             <button type="submit">Guardar registro</button>
         </form>
     </section>
+    <section id="clientes">
+        <h2>Clientes</h2>
+        <table>
+            <thead><tr><th>Usuario</th><th>Email</th><th>Membresía</th><th>Cuenta</th><th></th></tr></thead>
+            <tbody>
+            {% for cliente in users %}
+                <tr>
+                    <td>
+                        <form id="cliente-{{ cliente.id }}" method="post" action="{{ url_for('update_client', user_id=cliente.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"></form>
+                        <input form="cliente-{{ cliente.id }}" name="username" value="{{ cliente.username }}" aria-label="Nombre de usuario de {{ cliente.username }}" required>
+                    </td>
+                    <td><input form="cliente-{{ cliente.id }}" name="email" type="email" value="{{ cliente.email or '' }}" aria-label="Email de {{ cliente.username }}"></td>
+                    <td>{{ cliente.membership_label }}</td>
+                    <td>{{ 'Activo' if cliente.is_active else 'Inactivo' }}</td>
+                    <td>
+                        <button form="cliente-{{ cliente.id }}" type="submit">Guardar</button>
+                        <form method="post" action="{{ url_for('toggle_client_active', user_id=cliente.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="active" value="{{ '0' if cliente.is_active else '1' }}">
+                            <button type="submit">{{ 'Desactivar' if cliente.is_active else 'Reactivar' }}</button>
+                        </form>
+                    </td>
+                </tr>
+            {% else %}<tr><td colspan="5">Todavia no hay clientes.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </section>
     <section id="mensajes">
         <h2>Mensajes de contacto</h2>
         <table>
@@ -82,14 +108,34 @@
             </tbody>
         </table>
     </section>
-    <section>
+    <section id="servicios">
         <h2>Historial de servicios y pagos</h2>
         <table>
-            <thead><tr><th>Usuario</th><th>Trabajo</th><th>Pago</th><th>Historial</th><th>Fecha</th></tr></thead>
+            <thead><tr><th>Usuario</th><th>Trabajo</th><th>Pago</th><th>Historial</th><th>Estado</th><th>Fecha</th><th></th></tr></thead>
             <tbody>
             {% for record in records %}
-                <tr><td>{{ record.username }}</td><td>{{ record.job }}</td><td>{{ "%.2f"|format(record.payment) }}</td><td>{{ record.service_history }}</td><td>{{ record.created_at }}</td></tr>
-            {% else %}<tr><td colspan="5">Todavia no hay registros.</td></tr>{% endfor %}
+                <tr>
+                    <td>{{ record.username }}</td>
+                    <td>
+                        <form id="servicio-{{ record.id }}" method="post" action="{{ url_for('update_service_record', record_id=record.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"></form>
+                        <input form="servicio-{{ record.id }}" name="job" value="{{ record.job }}" aria-label="Trabajo del servicio de {{ record.username }}" required>
+                    </td>
+                    <td><input form="servicio-{{ record.id }}" name="payment" type="number" min="0" step="0.01" value="{{ record.payment }}" aria-label="Pago del servicio de {{ record.username }}" required></td>
+                    <td class="wrap-text"><textarea form="servicio-{{ record.id }}" name="service_history" rows="2" aria-label="Historial del servicio de {{ record.username }}" required>{{ record.service_history }}</textarea></td>
+                    <td>
+                        <select form="servicio-{{ record.id }}" name="status" aria-label="Estado del servicio de {{ record.username }}">
+                            {% for value, label in service_statuses.items() %}<option value="{{ value }}"{% if value == record.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                        </select>
+                    </td>
+                    <td>{{ record.created_at }}</td>
+                    <td>
+                        <button form="servicio-{{ record.id }}" type="submit">Guardar</button>
+                        <form method="post" action="{{ url_for('delete_service_record', record_id=record.id) }}" onsubmit="return confirm('¿Borrar este registro de servicio?');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit">Borrar</button>
+                        </form>
+                    </td>
+                </tr>
+            {% else %}<tr><td colspan="7">Todavia no hay registros.</td></tr>{% endfor %}
             </tbody>
         </table>
     </section>

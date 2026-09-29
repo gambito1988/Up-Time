@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Términos y condiciones | Up Time{% endblock %}
+{% block meta_description %}Términos y condiciones de Up Time: planes de membresía, forma de pago, garantía de los servicios técnicos y derecho de arrepentimiento.{% endblock %}
+{% block content %}
+<div class="intro"><p class="muted">MARCO LEGAL</p><h1>Términos y condiciones</h1><p class="muted">Última actualización: septiembre de 2026.</p></div>
+<section class="panel">
+    <h2>1. Quiénes somos</h2>
+    <p>Estos términos regulan el uso del sitio y la contratación de los servicios de <strong>{{ legal_name }}</strong> (en adelante, "Up Time"), CUIT {{ cuit }}, con domicilio en {{ address }}, Argentina. Contacto: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>.</p>
+
+    <h2>2. Objeto</h2>
+    <p>Up Time presta servicios de reparación, mantenimiento y soporte técnico de computadoras, de forma presencial (a domicilio, en CABA) u online, y ofrece membresías de soporte continuo con los planes descriptos más abajo.</p>
+
+    <h2>3. Planes de membresía y precios</h2>
+    <table>
+        <thead><tr><th>Plan</th><th>Precio</th><th>Incluye</th></tr></thead>
+        <tbody>
+        {% for plan in plans.values() %}
+            <tr><td>{{ plan.name }}</td><td>${{ '%.0f'|format(plan.price) }} ARS / mes</td><td>{{ plan.description }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <p>Los precios están expresados en pesos argentinos y pueden actualizarse; el precio vigente al momento de pagar es el que se cobra. Los cambios de precio no afectan a una membresía ya pagada durante su período vigente.</p>
+
+    <h2>4. Contratación y forma de pago</h2>
+    <p>El pago se procesa a través de Mercado Pago. Up Time no recibe ni almacena los datos de la tarjeta: esa información es gestionada íntegramente por Mercado Pago. La membresía se activa automáticamente cuando Mercado Pago confirma el pago como aprobado.</p>
+
+    <h2>5. Duración y renovación</h2>
+    <p>Cada membresía tiene una vigencia de {{ membership_days }} días corridos desde su activación o renovación. No hay renovación automática ni débito recurrente: al vencer, el cliente puede volver a pagar desde su cuenta para extenderla. No hay compromiso de permanencia mínima.</p>
+
+    <h2>6. Derecho de arrepentimiento</h2>
+    <p>Si contrataste una membresía a distancia (online), tenés derecho a arrepentirte dentro de los {{ withdrawal_days }} días corridos desde la contratación, sin costo ni necesidad de justificar el motivo, conforme al artículo 34 de la Ley 24.240. Podés ejercerlo desde el <a href="{{ url_for('right_of_withdrawal') }}">botón de arrepentimiento</a>.</p>
+
+    <h2>7. Servicios técnicos y garantía</h2>
+    <p>Antes de cada trabajo de reparación se entrega un presupuesto sin compromiso. Todos los trabajos realizados incluyen garantía; el alcance y la duración específica se acuerdan por escrito en el presupuesto de cada servicio.</p>
+
+    <h2>8. Responsabilidad</h2>
+    <p>Recomendamos hacer una copia de seguridad de tus datos antes de cualquier intervención técnica. Up Time no se responsabiliza por la pérdida de datos preexistente al servicio ni por fallas de hardware ajenas al trabajo contratado. La responsabilidad de Up Time se limita al valor del servicio efectivamente contratado.</p>
+
+    <h2>9. Cuenta de usuario</h2>
+    <p>Sos responsable de mantener la confidencialidad de tu contraseña y de toda actividad realizada desde tu cuenta. Avisanos de inmediato ante cualquier uso no autorizado.</p>
+
+    <h2>10. Modificaciones</h2>
+    <p>Podemos actualizar estos términos; la fecha de la última actualización figura al inicio de esta página. El uso continuado del sitio después de un cambio implica su aceptación.</p>
+
+    <h2>11. Ley aplicable y jurisdicción</h2>
+    <p>Estos términos se rigen por las leyes de la República Argentina. Ante cualquier controversia, las partes se someten a los tribunales ordinarios de la Ciudad Autónoma de Buenos Aires, sin perjuicio de las normas de protección al consumidor que resulten aplicables.</p>
+
+    <h2>12. Contacto</h2>
+    <p>Para consultas sobre estos términos, escribinos a <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>.</p>
+</section>
+{% endblock %}

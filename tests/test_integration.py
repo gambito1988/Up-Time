@@ -469,3 +469,125 @@ def test_contact_status_requires_admin(db, client):
     response = client.post("/gestion-privada/mensajes/1/estado", data={"status": "closed"})
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/gestion-privada")
+
+
+# --- Edicion y borrado de servicios, y clientes ---------------------------------
+
+def service_record_id():
+    return query("SELECT id FROM service_records")[0]["id"]
+
+
+def test_admin_can_edit_a_service_record(user_client, app_ctx, monkeypatch):
+    admin = app_ctx.app.test_client()
+    admin_login(admin, monkeypatch)
+    admin.post("/gestion-privada/panel", data=RECORD)
+    record_id = service_record_id()
+
+    response = admin.post(f"/gestion-privada/servicios/{record_id}/editar", data={
+        "job": "Cambio de pantalla", "service_history": "Se cambió la pantalla rota",
+        "payment": "2000", "status": "pagado",
+    })
+    assert response.status_code == 302
+    row = query("SELECT job, payment, status FROM service_records WHERE id = %s", (record_id,))[0]
+    assert row == {"job": "Cambio de pantalla", "payment": 2000.0, "status": "pagado"}
+
+
+def test_admin_edit_service_record_validates_input(user_client, app_ctx, monkeypatch):
+    admin = app_ctx.app.test_client()
+    admin_login(admin, monkeypatch)
+    admin.post("/gestion-privada/panel", data=RECORD)
+    record_id = service_record_id()
+
+    assert admin.post(f"/gestion-privada/servicios/{record_id}/editar",
+                       data={**RECORD, "payment": "abc"}).status_code == 400
+    assert admin.post(f"/gestion-privada/servicios/{record_id}/editar", data={
+        "job": "x", "service_history": "y", "payment": "10", "status": "no-existe",
+    }).status_code == 400
+
+
+def test_admin_can_delete_a_service_record(user_client, app_ctx, monkeypatch):
+    admin = app_ctx.app.test_client()
+    admin_login(admin, monkeypatch)
+    admin.post("/gestion-privada/panel", data=RECORD)
+    record_id = service_record_id()
+
+    assert admin.post(f"/gestion-privada/servicios/{record_id}/borrar").status_code == 302
+    assert query("SELECT id FROM service_records") == []
+
+
+def test_service_record_routes_require_admin(db, client):
+    assert client.post("/gestion-privada/servicios/1/editar", data={}).status_code == 302
+    assert client.post("/gestion-privada/servicios/1/borrar").status_code == 302
+
+
+def test_admin_can_edit_a_client(user_client, app_ctx, monkeypatch):
+    admin = app_ctx.app.test_client()
+    admin_login(admin, monkeypatch)
+    user_id = query("SELECT id FROM users WHERE username = 'ana'")[0]["id"]
+
+    response = admin.post(f"/gestion-privada/clientes/{user_id}/editar", data={
+        "username": "ana2", "email": "ana2@example.com",
+    })
+    assert response.status_code == 302
+    row = query("SELECT username, email FROM users WHERE id = %s", (user_id,))[0]
+    assert row == {"username": "ana2", "email": "ana2@example.com"}
+
+
+def test_admin_edit_client_rejects_conflicts(user_client, app_ctx, monkeypatch):
+    admin = app_ctx.app.test_client()
+    admin_login(admin, monkeypatch)
+    admin.post("/gestion-privada/panel", data={**RECORD, "username": "beto"})
+    ana_id = query("SELECT id FROM users WHERE username = 'ana'")[0]["id"]
+
+    assert admin.post(f"/gestion-privada/clientes/{ana_id}/editar", data={
+        "username": "beto", "email": "ana@example.com",
+    }).status_code == 400
+    assert admin.post(f"/gestion-privada/clientes/{ana_id}/editar", data={
+        "username": "ana", "email": "no-es-un-email",
+    }).status_code == 400
+
+
+def test_admin_can_deactivate_and_reactivate_a_client(user_client, app_ctx, monkeypatch):
+    admin = app_ctx.app.test_client()
+    admin_login(admin, monkeypatch)
+    user_id = query("SELECT id FROM users WHERE username = 'ana'")[0]["id"]
+
+    assert admin.post(f"/gestion-privada/clientes/{user_id}/estado", data={"active": "0"}).status_code == 302
+    assert query("SELECT is_active FROM users WHERE id = %s", (user_id,))[0]["is_active"] is False
+    assert login(user_client).status_code == 401  # cuenta desactivada: ya no puede iniciar sesion
+
+    assert admin.post(f"/gestion-privada/clientes/{user_id}/estado", data={"active": "1"}).status_code == 302
+    assert login(user_client).status_code == 302  # reactivada: vuelve a andar
+
+
+def test_client_routes_require_admin(db, client):
+    assert client.post("/gestion-privada/clientes/1/editar", data={}).status_code == 302
+    assert client.post("/gestion-privada/clientes/1/estado", data={"active": "0"}).status_code == 302
+
+
+# --- Boton de arrepentimiento ----------------------------------------------------
+
+def test_withdrawal_request_is_saved_and_notified_and_visible_to_admin(db, client, sent_emails, monkeypatch):
+    monkeypatch.setattr(app_module, "run_in_background", lambda function, *args: function(*args))
+    monkeypatch.setenv("CONTACT_NOTIFY_EMAIL", "negocio@example.com")
+    response = client.post("/arrepentimiento", data={
+        "nombre": "Ana", "email": "ana@example.com", "referencia": "Plan Básico, pagado el 20/09/2026",
+    })
+    assert response.status_code == 200
+    assert b"registramos tu solicitud" in response.data.lower()
+
+    row = query("SELECT id, name, email, message FROM contact_messages")[0]
+    assert row["name"] == "[Arrepentimiento] Ana"
+    assert row["email"] == "ana@example.com"
+    assert "Plan Básico" in row["message"]
+
+    # Un email al negocio (CONTACT_NOTIFY_EMAIL) y un comprobante al cliente con el numero de referencia.
+    recipients = {sent[0] for sent in sent_emails}
+    assert recipients == {"negocio@example.com", "ana@example.com"}
+    customer_email = next(sent for sent in sent_emails if sent[0] == "ana@example.com")
+    assert str(row["id"]) in customer_email[1]
+
+    admin = app_module.app.test_client()
+    admin_login(admin, monkeypatch)
+    page = admin.get("/gestion-privada/panel").data.decode()
+    assert "[Arrepentimiento] Ana" in page
