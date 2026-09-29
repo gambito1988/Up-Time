@@ -1113,7 +1113,9 @@ def confirm_membership():
                     "failure": url_for("membership_payment_result", _external=True),
                     "pending": url_for("membership_payment_result", _external=True),
                 },
-                "notification_url": url_for("mercado_pago_webhook", _external=True),
+                # Sin notification_url a proposito: asi Mercado Pago usa la URL/clave
+                # configurada en el panel de Webhooks de la aplicacion (la que firma
+                # con MERCADOPAGO_WEBHOOK_SECRET), no un mecanismo distinto por preferencia.
             },
         )
     except RuntimeError as error:
