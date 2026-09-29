@@ -8,7 +8,12 @@
     <p class="muted">Aquí puedes revisar tus servicios y administrar tu membresía.</p>
 </div>
 <div class="grid">
-    <section class="card"><p class="muted">MEMBRESÍA ACTUAL</p><h2>{{ user.membership_plan|capitalize if user.membership_plan else 'Sin membresía' }}</h2>{% if membership_state == 'active' %}<p>Activa{% if user.membership_expires_at %} hasta el {{ user.membership_expires_at.strftime('%d/%m/%Y') }}{% endif %}</p>{% elif membership_state == 'expired' %}<p>Vencida el {{ user.membership_expires_at.strftime('%d/%m/%Y') }}</p>{% else %}<p>Inactiva</p>{% endif %}<a class="button secondary" href="{{ url_for('memberships') }}">{{ 'Renovar' if membership_state != 'inactive' else 'Ver planes' }}</a></section>
+    <section class="card"><p class="muted">MEMBRESÍA ACTUAL</p><h2>{{ user.membership_plan|capitalize if user.membership_plan else 'Sin membresía' }}</h2>{% if membership_state == 'active' %}<p>Activa{% if user.membership_expires_at %} hasta el {{ user.membership_expires_at.strftime('%d/%m/%Y') }}{% endif %}</p>{% elif membership_state == 'expired' %}<p>Vencida el {{ user.membership_expires_at.strftime('%d/%m/%Y') }}</p>{% else %}<p>Inactiva</p>{% endif %}
+        <div class="actions">
+            <a class="button secondary" href="{{ url_for('memberships') }}">{{ 'Cambiar de plan' if membership_state == 'active' else ('Renovar' if membership_state == 'expired' else 'Ver planes') }}</a>
+            {% if membership_state == 'active' %}<form method="post" action="{{ url_for('cancel_membership') }}" onsubmit="return confirm('¿Cancelar tu membresía? Dejarás de tener acceso de inmediato y esto no genera ningún reembolso.');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="button secondary">Cancelar membresía</button></form>{% endif %}
+        </div>
+    </section>
     <section class="card"><p class="muted">EMAIL</p><h2>{{ user.email }}</h2><p class="muted">Email confirmado</p><form method="post" action="{{ url_for('user_logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Cerrar sesión</button></form></section>
 </div>
 <section class="panel" style="margin-top: 1.5rem;">
@@ -18,6 +23,16 @@
         <tbody>
         {% for record in records %}<tr><td>{{ record.created_at }}</td><td>{{ record.job }}</td><td>{{ record.service_history }}</td><td>${{ '%.2f'|format(record.payment) }}</td><td><form method="post" action="{{ url_for('repeat_service', record_id=record.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Volver a pedir</button></form></td></tr>
         {% else %}<tr><td colspan="5" class="muted">Todavía no tienes servicios registrados.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</section>
+<section class="panel" style="margin-top: 1.5rem;">
+    <h2>Historial de pagos</h2>
+    <table>
+        <thead><tr><th>Fecha</th><th>Plan</th><th>Monto</th><th>Estado</th><th>Comprobante</th></tr></thead>
+        <tbody>
+        {% for payment in payments %}<tr><td>{{ payment.paid_at or payment.created_at }}</td><td>{{ payment.plan|capitalize }}</td><td>${{ '%.2f'|format(payment.amount) }}</td><td>{{ payment_status_labels.get(payment.status, payment.status) }}</td><td>{{ payment.payment_reference }}</td></tr>
+        {% else %}<tr><td colspan="5" class="muted">Todavía no tienes pagos registrados.</td></tr>{% endfor %}
         </tbody>
     </table>
 </section>

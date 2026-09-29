@@ -42,6 +42,10 @@ PUBLIC_ASSETS = {"index.html", "styles.css", "favicon.svg"}
 CONTACT_LIMITS = {"nombre": 100, "email": 254, "telefono": 40, "mensaje": 2000}
 CONTACT_STATUSES = {"new": "Nuevo", "replied": "Respondido", "closed": "Cerrado"}
 SERVICE_STATUSES = {"pendiente": "Pendiente", "pagado": "Pagado"}
+PAYMENT_STATUS_LABELS = {
+    "pending": "Pendiente", "approved": "Aprobado", "rejected": "Rechazado",
+    "refunded": "Reembolsado", "charged_back": "Contracargo", "cancelled": "Cancelado",
+}
 MEMBERSHIP_STATE_LABELS = {"active": "Activa", "expired": "Vencida", "inactive": "Sin membresía"}
 MEMBERSHIP_PLANS = {
     "basic": {"name": "Basic", "price": 5000, "description": "Soporte remoto y prioridad estándar."},
@@ -970,9 +974,32 @@ def user_dashboard():
             "SELECT * FROM service_records WHERE user_id = %s ORDER BY created_at DESC, id DESC",
             (session["user_id"],),
         ).fetchall()
+        payments = connection.execute(
+            "SELECT payment_reference, plan, amount, status, created_at, paid_at "
+            "FROM membership_payments WHERE user_id = %s ORDER BY created_at DESC, id DESC",
+            (session["user_id"],),
+        ).fetchall()
     return render_template(
-        "user_dashboard.html", user=user, records=records, membership_state=membership_state(user)
+        "user_dashboard.html",
+        user=user,
+        records=records,
+        payments=payments,
+        payment_status_labels=PAYMENT_STATUS_LABELS,
+        membership_state=membership_state(user),
     )
+
+
+@app.post("/usuarios/membresia/cancelar")
+@user_required
+def cancel_membership():
+    # No hay debito automatico que cancelar: esto solo apaga la membresia ya pagada antes de tiempo.
+    # No genera ningun reembolso; para eso esta el boton de arrepentimiento, dentro de sus 10 dias.
+    with get_db() as connection:
+        connection.execute(
+            "UPDATE users SET membership_status = 'inactive' WHERE id = %s AND membership_status = 'active'",
+            (session["user_id"],),
+        )
+    return redirect(url_for("user_dashboard"))
 
 
 @app.post("/usuarios/servicios/repetir/<int:record_id>")
