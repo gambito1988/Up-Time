@@ -387,6 +387,22 @@ def healthz():
     return jsonify(status="ok")
 
 
+@app.get("/keepalive")
+@limiter.limit("60 per hour")
+def keepalive():
+    # Pensado para un monitor externo (p. ej. UptimeRobot cada 5 min): mantiene despierto el
+    # servicio de Render y hace una consulta real para que Supabase (plan gratis) no pause
+    # el proyecto por inactividad. Va aparte de /healthz para que una caída momentánea de la
+    # base no haga que Render marque la instancia como no sana y la reinicie.
+    try:
+        with get_db() as connection:
+            connection.execute("SELECT 1")
+    except DATABASE_ERRORS:
+        app.logger.exception("Keep-alive: la base de datos no responde")
+        return jsonify(status="db_error"), 503
+    return jsonify(status="ok")
+
+
 @app.get("/favicon.ico")
 def favicon_ico():
     # Los navegadores piden /favicon.ico por default aunque el <link rel="icon"> apunte al SVG.
