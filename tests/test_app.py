@@ -15,6 +15,36 @@ def test_healthz(client):
     assert response.get_json() == {"status": "ok"}
 
 
+def test_keepalive_queries_database(client, monkeypatch):
+    executed = []
+
+    class FakeConnection:
+        def execute(self, query):
+            executed.append(query)
+
+    @contextmanager
+    def fake_get_db():
+        yield FakeConnection()
+
+    monkeypatch.setattr(app_module, "get_db", fake_get_db)
+    response = client.get("/keepalive")
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ok"}
+    assert executed == ["SELECT 1"]
+
+
+def test_keepalive_returns_503_when_database_is_down(client, monkeypatch):
+    @contextmanager
+    def broken_get_db():
+        raise app_module.psycopg.OperationalError("db caída")
+        yield
+
+    monkeypatch.setattr(app_module, "get_db", broken_get_db)
+    response = client.get("/keepalive")
+    assert response.status_code == 503
+    assert response.get_json() == {"status": "db_error"}
+
+
 def test_home_serves_landing(client):
     response = client.get("/")
     assert response.status_code == 200
