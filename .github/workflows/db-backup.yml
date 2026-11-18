@@ -1,0 +1,91 @@
+name: Backup de la base
+
+# Backup diario cifrado de la base de Supabase hacia Cloudflare R2 (almacenamiento privado).
+# El repo es PUBLICO: el dump nunca se sube como artifact ni se commitea; solo sale cifrado con age.
+# Configuracion y restauracion: docs/backups.md
+
+on:
+  schedule:
+    - cron: "17 6 * * *" # 03:17 hora de Argentina (UTC-3)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    # No correr en forks: no tienen los secretos y no corresponde.
+    if: github.repository_owner == 'gambito1988'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      # Evita incompatibilidades de checksums entre AWS CLI reciente y R2.
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      RETENTION_DAYS: "30"
+    steps:
+      - name: Instalar cliente de PostgreSQL 17 y age
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17 age
+
+      - name: Dump de la base
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          echo "STAMP=$(date -u +%Y-%m-%dT%H%M%SZ)" >> "$GITHUB_ENV"
+          # Solo el esquema public: es donde vive la app. Los esquemas internos de Supabase se omiten.
+          /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" \
+            --schema=public --no-owner --no-acl --format=custom --file=backup.dump
+          # Verificacion: el dump debe ser legible y contener datos de tablas.
+          /usr/lib/postgresql/17/bin/pg_restore --list backup.dump > toc.txt
+          grep -q "TABLE DATA" toc.txt || { echo "El dump no contiene datos de tablas"; exit 1; }
+          rm toc.txt
+
+      - name: Cifrar con age
+        env:
+          BACKUP_AGE_PUBLIC_KEY: ${{ secrets.BACKUP_AGE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          age -r "$BACKUP_AGE_PUBLIC_KEY" -o "backup-${STAMP}.dump.age" backup.dump
+          rm -f backup.dump
+          test -s "backup-${STAMP}.dump.age"
+
+      - name: Subir a R2
+        run: |
+          set -euo pipefail
+          aws s3 cp "backup-${STAMP}.dump.age" "s3://${R2_BUCKET}/db-backups/backup-${STAMP}.dump.age" \
+            --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          rm -f "backup-${STAMP}.dump.age"
+
+      - name: Borrar backups viejos
+        run: |
+          set -euo pipefail
+          CUTOFF=$(date -u -d "${RETENTION_DAYS} days ago" +%Y-%m-%dT%H%M%SZ)
+          KEYS=$(aws s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix db-backups/ \
+            --endpoint-url "$R2_ENDPOINT" --query 'Contents[].Key' --output text)
+          if [ -z "$KEYS" ] || [ "$KEYS" = "None" ]; then exit 0; fi
+          for key in $(echo "$KEYS" | tr '\t' '\n'); do
+            ts=$(basename "$key" | sed -E 's/^backup-(.*)\.dump\.age$/\1/')
+            # Solo borra archivos con el formato esperado y mas viejos que el corte.
+            if [[ "$ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z$ ]] && [[ "$ts" < "$CUTOFF" ]]; then
+              echo "Borrando $key"
+              aws s3 rm "s3://${R2_BUCKET}/${key}" --endpoint-url "$R2_ENDPOINT" --only-show-errors
+            fi
+          done
