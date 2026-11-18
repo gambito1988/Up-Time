@@ -51,6 +51,21 @@ def test_home_serves_landing(client):
     assert b"Up Time" in response.data
 
 
+def test_business_email_default_is_up_time_with_hyphen():
+    assert app_module.BUSINESS_EMAIL == "info@up-time.com.ar"
+
+
+def test_home_mailto_link_uses_business_email(client):
+    body = client.get("/").data.decode()
+    assert "mailto:info@up-time.com.ar" in body
+
+
+@pytest.mark.parametrize("source_file", ["index.html", "app.py"])
+def test_no_hyphenless_domain_leftover(source_file):
+    text = (app_module.BASE_DIR / source_file).read_text(encoding="utf-8")
+    assert "uptime.com.ar" not in text
+
+
 @pytest.mark.parametrize("path", ["/styles.css", "/index.html", "/favicon.svg"])
 def test_public_assets_are_served(client, path):
     assert client.get(path).status_code == 200
