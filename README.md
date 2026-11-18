@@ -26,6 +26,45 @@ Las variables disponibles están en `.env.example`. En Render, `SECRET_KEY` y `D
 
 Configura `MERCADOPAGO_ACCESS_TOKEN` y, en el panel de Mercado Pago (Webhooks), la URL `https://<tu-dominio>/pagos/mercado-pago/webhook`. Copia la clave secreta del webhook en `MERCADOPAGO_WEBHOOK_SECRET` para que se verifique la firma de cada notificación.
 
+## Backups de la base de datos
+
+`.github/workflows/backup.yml` corre todos los días a las 03:00 (ART) y sube un `pg_dump` cifrado a un bucket de Cloudflare R2. Los domingos, además, guarda una copia en `weekly/`. La retención (14 diarios, 8 semanales) la aplican reglas de expiración del propio bucket, que el workflow re-declara en cada corrida.
+
+El cifrado es con [age](https://github.com/FiloSottile/age): el CI solo conoce la **clave pública**, nunca la privada, así que aunque se filtraran los secrets de GitHub no se podría leer un backup viejo.
+
+### Configuración inicial (una sola vez)
+
+1. Generar el par de claves **en tu máquina, no en el CI**:
+   ```bash
+   age-keygen -o backup-key.txt
+   ```
+   Guardá `backup-key.txt` (la clave privada) en un lugar seguro fuera del repo (gestor de contraseñas, caja fuerte, etc.). Si se pierde, los backups viejos quedan irrecuperables.
+
+2. Crear un bucket en Cloudflare R2 (ej. `up-time-backups`) y un API token con permiso de lectura/escritura solo sobre ese bucket.
+
+3. Cargar estos **GitHub Secrets** en el repo (Settings → Secrets and variables → Actions):
+
+   | Secret | Valor |
+   |---|---|
+   | `DATABASE_URL` | cadena de conexión de solo lectura/uso del dump (misma que usa la app) |
+   | `BACKUP_AGE_PUBLIC_KEY` | la línea `public key:` que imprimió `age-keygen` |
+   | `R2_ACCOUNT_ID` | ID de cuenta de Cloudflare |
+   | `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | credenciales del API token de R2 |
+   | `R2_BUCKET` | nombre del bucket |
+
+### Restaurar un backup
+
+1. Bajar el archivo cifrado del bucket (consola de Cloudflare R2, o `aws s3 cp` con las mismas credenciales apuntando al endpoint `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`).
+2. Desencriptar con la clave privada que generaste en el paso 1 de arriba:
+   ```bash
+   age -d -i backup-key.txt -o backup.dump backup-2026-11-18.dump.age
+   ```
+3. Restaurar **contra una base de prueba**, nunca directo a producción:
+   ```bash
+   pg_restore --no-owner --clean --if-exists -d "$TEST_DATABASE_URL" backup.dump
+   ```
+4. Si todo se ve bien ahí, recién entonces considerar restaurar sobre producción (y avisar al equipo antes de hacerlo).
+
 ## Herramientas para Claude Code
 
 Consulta [docs/herramientas-claude-code.md](docs/herramientas-claude-code.md) para instalar Graphify, claude-mem, Headroom, OmniRoute, claude-code-setup y task-observer.

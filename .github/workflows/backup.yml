@@ -1,0 +1,93 @@
+name: Backup de base de datos
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC = 03:00 ART, todos los dias
+  workflow_dispatch: {}
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BACKUP_AGE_PUBLIC_KEY: ${{ secrets.BACKUP_AGE_PUBLIC_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+
+    steps:
+      - name: Instalar postgresql-client y age
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client age awscli
+
+      - name: Elegir retencion del dia (diario o semanal)
+        id: tier
+        run: |
+          if [ "$(date -u +%u)" = "7" ]; then
+            echo "tier=weekly" >> "$GITHUB_OUTPUT"
+          else
+            echo "tier=daily" >> "$GITHUB_OUTPUT"
+          fi
+          echo "stamp=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Volcar la base (pg_dump)
+        run: |
+          pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges \
+            --file="backup-${{ steps.tier.outputs.stamp }}.dump"
+
+      - name: Verificar que el dump no esta vacio y es un volcado valido
+        run: |
+          DUMP="backup-${{ steps.tier.outputs.stamp }}.dump"
+          test -s "$DUMP"
+          pg_restore --list "$DUMP" > /dev/null
+
+      - name: Cifrar con age (solo la clave publica toca el CI)
+        run: |
+          DUMP="backup-${{ steps.tier.outputs.stamp }}.dump"
+          age -r "$BACKUP_AGE_PUBLIC_KEY" -o "$DUMP.age" "$DUMP"
+          rm -f "$DUMP"
+
+      - name: Subir a Cloudflare R2
+        run: |
+          DUMP="backup-${{ steps.tier.outputs.stamp }}.dump.age"
+          TIER="${{ steps.tier.outputs.tier }}"
+          aws s3 cp "$DUMP" "s3://$R2_BUCKET/daily/$DUMP" \
+            --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          if [ "$TIER" = "weekly" ]; then
+            aws s3 cp "s3://$R2_BUCKET/daily/$DUMP" "s3://$R2_BUCKET/weekly/$DUMP" \
+              --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          fi
+
+      - name: Asegurar reglas de retencion en el bucket (14 diarios / 8 semanales)
+        run: |
+          cat > lifecycle.json <<'JSON'
+          {
+            "Rules": [
+              {
+                "ID": "expire-daily-14d",
+                "Filter": {"Prefix": "daily/"},
+                "Status": "Enabled",
+                "Expiration": {"Days": 14}
+              },
+              {
+                "ID": "expire-weekly-56d",
+                "Filter": {"Prefix": "weekly/"},
+                "Status": "Enabled",
+                "Expiration": {"Days": 56}
+              }
+            ]
+          }
+          JSON
+          aws s3api put-bucket-lifecycle-configuration \
+            --bucket "$R2_BUCKET" \
+            --lifecycle-configuration file://lifecycle.json \
+            --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
